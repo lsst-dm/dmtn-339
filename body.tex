@@ -1,6 +1,138 @@
 \section{Introduction}
 
-\textbf{Put your paper here.}
-\vskip 0.4in
+The NSF-DOE Vera C.\ Rubin Observatory is designed to take data for the Legacy Survey of Space and Time over a period of 10 years.\cite{2019ApJ...873..111I}.
+We made our first data preview release (DP1) in 2025 using data from our commissioning camera\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from LSSTCam.\cite{10.71929/rubin/2571927,RTN-111}
+For DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS headers.
+The resultant FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque data that required specific Rubin science pipeline software\cite{PSTN-019} to interpret.
+In this paper we will describe the FITS layout we used for DP1 and describe its limitations.
+Then we will present our new approach to modeling our data structures and how we represent it in both FITS and HDF5 files.
 
-This is the Rubin Observatory overview paper: \cite{2019ApJ...873..111I}.
+\section{The Rubin Visit Image Data Model}
+
+The most complex image dataset type we write are those from our visit images.
+At Rubin we define ``visit'' as an on-sky exposure.
+During construction we had planned to support an observing mode where two on-sky exposures would be taken sequentially without moving the telescope or instrument rotator and those would be called a visit.
+This changed during commissioning when we decided to drop the two-exposure mode and so now a visit is always a single on-sky exposure.
+For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
+Every visit includes a 32-bit mask as well as a variance array to go with the image data and FITS-style (keyword, value, and comment) metadata.
+
+The data model consists of the following additional components.
+
+\subsubsection{Bounded Fields}
+
+Some of the data model components rely on being able to represent a mathematical function to be evaluated over specific regions of the image.
+we call these \emph{bounded fields} and they are usually represented as Chebyshev polynomials but can also be specified as splines.
+
+\subsection{Visit Information}
+
+A \texttt{VisitInfo} contains standardized information about the entire visit.
+This includes the weather conditions, the instrument and observatory location, the time of the observation, the boresight tracking coordinates, and the exposure time.
+Confusingly, calibration observations do result in a \texttt{VisitInfo} being defined although some of the components are undefined in that case.
+We will not consider calibration datasets any further in this discussion since they generally are representable by a subset of the visit data model.
+
+\subsection{Filter Label}
+
+This is a small look up table defining the physical filter used for the observation and the waveband for that filter.
+
+\subsection{Detector Information}
+
+LSSTCam has 189 science detectors along with additional wave front sensors and guider detectors.
+Each dataset contains a special detector object that describes the properties of this detector such as the serial number and manufactuer, the amplifier layout, and how the cordinates transform from focal plane position in millimeters to pixel coordinate.
+
+\subsection{Point-Spread Function}
+
+There are many ways to represent a point-spread function (PSF) and we use a plugin system to allow different variants to be stored.
+We use both a heavily modified version of \texttt{PSFEx} \cite{2011ASPC..442..435B,2013ascl.soft01001B} and \texttt{Piff} \cite{2021ascl.soft02024J,2021MNRAS.501.1282J} in our production pipelines.
+The PSF can vary across the image and the PSF model has to be able to account for that.
+
+\subsection{Exposure Summary Statistics}
+
+During the analysis of a visit the pipeline calculates derived scalar quantities which we store in a small class.
+These include summaries of global PSF properties, source counts, and effective exposure times and bounding boxes.
+This information can be used by downstream pipeline components to decide whether a visit should be included in a co-add or not.
+Unlike \texttt{VisitInfo} the summary statistics can change depending on pipeline configuration.
+
+\subsection{World Coordinate Systems}
+
+At the large scale of the LSSTCam focal plane combined with atmospheric effects the standard FITS approaches to specifying a world coordinate system are not sufficiently accurate.
+We use the Starlink AST WCS library \cite{2016A&C....15...33B} as this gives us the flexibility to define our WCS in terms of individual steps that can be chained together in whatever order we deem appropriate.
+In that way we can include large scale polynomial distortions as well as more localized effects by using splines.
+The WCS is represented by an AST mapping that is abstracted from the user by a Rubin-specific interface.
+
+\subsection{Validity Region}
+
+This is a polygon in pixel coordinates defining the valid region of the image.
+For a visit, as opposed to a co-add on a fixed sky map, this is generally the entire image including half pixel corrections to take into account the pixel edges.
+
+\subsection{Aperture Corrections}
+
+Multiple aperture corrections can be stored, each one being labeled and associated with a bounded field.
+Different measurement algorithms can result in different aperture corrections and the user can select the appropriate one.
+
+\subsection{Transmission Curve}
+
+This component represents the throughput as a function of wavelength, generally using units of Angstroms.
+
+\subsection{Photometric Calibration}
+
+Part of the visit processing determines how the image should be corrected to convert detector units to nJy.
+The calibration can vary across the field and is represented by a bounded field.
+
+\section{DP1 FITS Files}
+
+\begin{figure}[ht]
+\begin{center}
+\begin{small}
+\begin{verbatim}
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU     720   ()
+  1  IMAGE         1 CompImageHDU     72   (256, 250)   float32
+  2  MASK          1 CompImageHDU     88   (256, 250)   int32
+  3  VARIANCE      1 CompImageHDU     72   (256, 250)   float32
+  4  ARCHIVE_INDEX    1 BinTableHDU     41   484R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
+  5  FilterLabel    1 BinTableHDU     28   1R x 3C   [2X, 32A, 32A]
+  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, ..., 1J]
+  7  TransformMap    1 BinTableHDU     33   411R x 5C   [1QA(10), 1QA(7), 1QA(10), 1QA(7), 1J]
+  8  ExposureSummaryStats    1 BinTableHDU     19   413R x 1C   [1QB(117321)]
+  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), ..., 1QA(2)]
+ 10  Polygon       1 BinTableHDU     21   5R x 2C   [1D, 1D]
+ 11  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(89756), 1QB(10441)]
+ 12  ApCorrMap     1 BinTableHDU     21   62R x 2C   [64A, 1J]
+ 13  ChebyshevBoundedField    1 BinTableHDU     41   33R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
+ 14  ChebyshevBoundedField    2 BinTableHDU     42   30R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
+ 15  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
+\end{verbatim}
+\end{small}
+\end{center}
+\label{fig:old-layout}
+\caption{The structure of a slice of a representative FITS file from DP2.}
+\end{figure}
+
+
+A summary of the layout of a FITS file produced for DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
+The pixel data use standard FITS data arrays with compression to represent the primary image data, the variance, and the mask.
+The mask image is a 2-d 32-bit integer array supporting 32 individual mask planes.
+\emph{How do we know the names of each mask plane? Is it hardcoded in afw?}
+
+The FITS primary header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
+In general it is not possible to accurately represent the world coordinates of a visit image using the standard FITS-WCS approach.
+We therefore store an approximation of the WCS in the headers in SIP form\cite{2005ASPC..347..491S} so that tools like Astropy\cite{2013A&A...558A..33A} and Firefly\cite{2019ASPC..521...32W} can see some coordinates, even if they are not accurate at the pixel level.
+
+The \texttt{VisitInfo} struct also serializes into the FITS primary header.
+We now consider this to be an anti-pattern because the keywords are not namespaced.
+This can lead to confusion where a header from an instrument using \texttt{PRESSURE} to represent the air pressure in one unit, will get a new value in a different unit.
+Even more dangerously, we write the midpoint of the observation using the standard \texttt{DATE-AVG} header and we force \texttt{TIMESYS} to TAI without attempting to adjust any other standard \texttt{DATE-} headers that might be in the file from the instrument raw headers using UTC.
+This can lead to errors from any tooling that is trying to interpret headers using the standard.
+If we were approaching this today we would store the \texttt{VisitInfo} in the header using and approach like \texttt{HIERARCH LSST VISITINFO DATE-AVG} and make it absolutely clear which headers were coming from the serialization and which were originally from the raw data.
+
+The remaining content is stored in FITS binary tables.
+
+
+\section{The DP2 Data Model}
+
+
+\subsection{FITS Serialization}
+
+\subsection{HDF5 Serialization}
+
+\section{Conclusion}
