@@ -18,7 +18,7 @@ Every visit includes a 32-bit mask as well as a variance array to go with the im
 
 The data model consists of the following additional components.
 
-\subsubsection{Bounded Fields}
+\subsection{Bounded Fields}
 
 Some of the data model components rely on being able to represent a mathematical function to be evaluated over specific regions of the image.
 we call these \emph{bounded fields} and they are usually represented as Chebyshev polynomials but can also be specified as splines.
@@ -85,27 +85,29 @@ The calibration can vary across the field and is represented by a bounded field.
 \begin{small}
 \begin{verbatim}
 No.    Name      Ver    Type      Cards   Dimensions   Format
-  0  PRIMARY       1 PrimaryHDU     720   ()
+  0  PRIMARY       1 PrimaryHDU     722   ()
   1  IMAGE         1 CompImageHDU     72   (256, 250)   float32
   2  MASK          1 CompImageHDU     88   (256, 250)   int32
   3  VARIANCE      1 CompImageHDU     72   (256, 250)   float32
-  4  ARCHIVE_INDEX    1 BinTableHDU     41   484R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
+  4  ARCHIVE_INDEX    1 BinTableHDU     41   429R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
   5  FilterLabel    1 BinTableHDU     28   1R x 3C   [2X, 32A, 32A]
-  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, ..., 1J]
+  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, 1QA(14), 1J, ..., 1J]
   7  TransformMap    1 BinTableHDU     33   411R x 5C   [1QA(10), 1QA(7), 1QA(10), 1QA(7), 1J]
-  8  ExposureSummaryStats    1 BinTableHDU     19   413R x 1C   [1QB(117321)]
-  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), ..., 1QA(2)]
+  8  ExposureSummaryStats    1 BinTableHDU     18   412R x 1C   [1QB(3410)]
+  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), 1J, ..., 1D, 1QA(2)]
  10  Polygon       1 BinTableHDU     21   5R x 2C   [1D, 1D]
- 11  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(89756), 1QB(10441)]
- 12  ApCorrMap     1 BinTableHDU     21   62R x 2C   [64A, 1J]
- 13  ChebyshevBoundedField    1 BinTableHDU     41   33R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
- 14  ChebyshevBoundedField    2 BinTableHDU     42   30R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
- 15  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
+ 11  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(16161), 1QB(10442)]
+ 12  PsfexPsf      1 BinTableHDU     52   1R x 9C   [1J, 1J, 1J, 1J, 1J, 1J, 1D, 1D, 1E]
+ 13  PsfexPsf      2 BinTableHDU     46   1R x 8C   [2J, 1J, 6D, 6D, 3J, 41334E, 2D, 2D]
+ 14  ApCorrMap     1 BinTableHDU     21   6R x 2C   [64A, 1J]
+ 15  ChebyshevBoundedField    1 BinTableHDU     41   5R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
+ 16  ChebyshevBoundedField    2 BinTableHDU     42   2R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
+ 17  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
 \end{verbatim}
 \end{small}
 \end{center}
 \label{fig:old-layout}
-\caption{The structure of a slice of a representative FITS file from DP2.}
+\caption{The structure of a slice of a representative FITS file using the legacy schema.}
 \end{figure}
 
 
@@ -120,15 +122,110 @@ We therefore store an approximation of the WCS in the headers in SIP form\cite{2
 
 The \texttt{VisitInfo} struct also serializes into the FITS primary header.
 We now consider this to be an anti-pattern because the keywords are not namespaced.
-This can lead to confusion where a header from an instrument using \texttt{PRESSURE} to represent the air pressure in one unit, will get a new value in a different unit.
+This can lead to confusion where a header from an instrument using \texttt{PRESSURE} to represent the air pressure in one unit, will get a new value in a potentially different unit.
 Even more dangerously, we write the midpoint of the observation using the standard \texttt{DATE-AVG} header and we force \texttt{TIMESYS} to TAI without attempting to adjust any other standard \texttt{DATE-} headers that might be in the file from the instrument raw headers using UTC.
 This can lead to errors from any tooling that is trying to interpret headers using the standard.
-If we were approaching this today we would store the \texttt{VisitInfo} in the header using and approach like \texttt{HIERARCH LSST VISITINFO DATE-AVG} and make it absolutely clear which headers were coming from the serialization and which were originally from the raw data.
+If we were approaching this today we would store the \texttt{VisitInfo} in the header using an approach like \texttt{HIERARCH LSST VISITINFO DATE-AVG} and make it absolutely clear which headers were coming from the serialization and which were originally from the raw data.
+We also write the detector name and detector serial ID into headers \texttt{DETNAME} and \texttt{DETSER}.
 
 The remaining content is stored in FITS binary tables.
 
+\subsection{Table Archive System}
+
+The fundamental serialization approach for the DP1 data involves a generic persistence infrastructure that converts exposure components into rows of tables that can be stored in FITS.
+
+Each component registers itself as a storable that implements the creation of a tabular version of the object that can be stored.
+During serialization each component is allocated an integer archive ID that is referenced by a table of contents stored in the \texttt{ARCHIVE\_INDEX} extension.
+The ID itself is stored in the primary FITS header with key \texttt{ARCHIVE\_INDEX\_<COMPONENT>}.
+
+Each component is then represented in the \texttt{ARCHIVE\_INDEX} table indexed by the ID which refers to a later HDU and rows within that HDU.
+If components share the same table schema they are written to the same HDU, which leads to a storage efficiency but does mean that each HDU can not be interpreted without the primary index.
+
+\subsubsection{Component Serializations}
+
+The components themselves are serialized in different ways.
+
+\begin{description}
+
+  \item[\textbf{FilterLabel}]
+
+  This is a very simple table with two rows.
+  One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
+
+  \item[\textbf{Detector}]
+
+  This is written as two catalogs.
+  The first summarizes detector properties and the second describes amplifier properties with one row per amplifier.
+
+  \item[\textbf{TransformMap}]
+
+  This contains 2-D mappings define detector transformations from different frames.
+  The mappings are byte string native serializations of the AST library mappings.
+
+\item[\textbf{Polygon}]
+
+Polygons are represented as a two column table containing the \texttt{x} and \texttt{y} vertices.
+
+\item[\textbf{SkyWcs}]
+
+This represents the pixel to sky transformations represented as a byte string native serialization of the AST library.
+Optionally we can also store the FITS WCS approximation of the full mapping.
+
+\item[\textbf{PhotoCalib}]
+
+This table contains the scalar calibration information and references to archive IDs of bounded fields.
+
+\item[\textbf{ApCorrMap}]
+
+This is a simple table that associates the name of the correction with a reference to the bounded field.
+
+\item[\textbf{ChebyshevBoundedField}]
+
+These define the bounded fields referenced from other HDUs.
+Each row defines the Chebyshev order, the bounding box for which the polynomial is valid and the polynomial coefficients.
+
+\emph{Why do we end up with two HDUs with Chebyshev fields? Is it because there are different coefficient counts?}
+
+\item[\textbf{ExposureSummaryStats}]
+
+This is a Python data class.
+All Python packages must serialize as strings which are stored in a single bytes column.
+For this class the serialization uses YAML, but since this schema is also used by other components the HDU will likely contain serializations from other classes and the HDU name is going to depend on the order of serialization.
+
+\item[\textbf{PSFs}]
+
+The PSF component is polymorphic.
+AFW only sees it through the persistable interface.
+The actual FITS representation depends on the concrete PSF class and its registered factory.
+For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
+
+\end{description}
+
+\section{Limitations of the DP1 Serialization}
+
+A key limitation for implementers was the difficulty in adding new components to the archive system.
+The core of the system requires C++ and it was only relatively recently that we were able to include Python classes into the serialization mechanism.
+Even then, each class is required to inherit from the \texttt{Storable} infrastructure in order to hook into the serialization system.
+This adds an unnecessary burden on each class.
+
+Whilst the implementation complexity is only of concern to developers and is a one off cost, a more fundamental issue relates to the long-term usability of these files.
+As can be seen from Fig.~\ref{fig:old-layout} the extension names do not necessarily tell you what the extension is associated with; for example, bounded fields are serialized as extensions but you do not know which component the bounded field is associated with.
+As described previously, multiple components can also be written to the same HDU, with the \texttt{EXTNAME} referring to only one of the components out of convenience.
+In order to understand what each extension is part of you must first read the index extension.
+
+The complex logic effectively requires an end-user uses the \texttt{lsst.afw} Python classes to read the extensions.
+Re-implementing the logic in Astropy is potentially possible with modern large-language model coding tools using the AFW code as a reference, but it would be preferable to avoid this situation.
+
+The requirement to read the archive index does have other ramifications.
+The system was designed in an era when there was an assumption that the file would always be available on a POSIX file system.
+For DP1 we store the data in Google Cloud Storage and DP2 will be stored at SLAC but accessed remotely from Google\cite{2024SPIE13101E..2BO}.
+When a user requests a component, such as the valid polygon, we would ideally like to retrieve only the HDU containing that information.
+The simplest option would be to download the entire file to local storage and then read the component.
+To avoid downloading megabytes of pixel data, instead what we have to do is construct fake single-pixel image HDUs for the image/variance/mask arrays and then download all the extension HDUs so we can write a file locally and use the AFW code to read the index and then construct the extension.
+This is not efficient but is an inevitable outcome of the approach.
 
 \section{The DP2 Data Model}
+
 
 
 \subsection{FITS Serialization}
