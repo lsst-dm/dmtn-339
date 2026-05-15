@@ -78,6 +78,14 @@ This component represents the throughput as a function of wavelength, generally 
 Part of the visit processing determines how the image should be corrected to convert detector units to nJy.
 The calibration can vary across the field and is represented by a bounded field.
 
+\subsection{Class Hierarchy}
+
+In the LSST Science Pipelines every image dataset is represented by the \texttt{lsst.afw.image.Exposure} class in both C++ and Python.
+An \texttt{Exposure} consists of a \texttt{MaskedImage} and an \texttt{ExposureInfo}.
+The \texttt{MaskedImage} contains two \texttt{Image} objects (including the variance) and a \texttt{Mask} object, and bounding boxes and metadata.
+One design decision that has caused confusion over the years is that you cannot associate world coordinates with a \texttt{MaskedImage} or \texttt{Image}, even though, conceptually, everyone expects such an entity to have a well-defined WCS.
+Instead the WCS is associated with the \texttt{ExposureInfo} where the additional components described above are defined.
+
 \section{DP1 FITS Files}
 
 \begin{figure}[ht]
@@ -203,10 +211,12 @@ For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two 
 
 \section{Limitations of the DP1 Serialization}
 
+We have been battling the limitations of this serialization framework for some time.\cite{DMTN-120,DMTN-251}
 A key limitation for implementers was the difficulty in adding new components to the archive system.
 The core of the system requires C++ and it was only relatively recently that we were able to include Python classes into the serialization mechanism.
 Even then, each class is required to inherit from the \texttt{Storable} infrastructure in order to hook into the serialization system.
 This adds an unnecessary burden on each class.
+Furthermore, since we expect every image dataset we write to be using the AFW \texttt{Exposure} classes this means that whenever we need to add support for a new component, every dataset type sees that component even if it is not useful for that variant.
 
 Whilst the implementation complexity is only of concern to developers and is a one off cost, a more fundamental issue relates to the long-term usability of these files.
 As can be seen from Fig.~\ref{fig:old-layout} the extension names do not necessarily tell you what the extension is associated with; for example, bounded fields are serialized as extensions but you do not know which component the bounded field is associated with.
@@ -215,6 +225,9 @@ In order to understand what each extension is part of you must first read the in
 
 The complex logic effectively requires an end-user uses the \texttt{lsst.afw} Python classes to read the extensions.
 Re-implementing the logic in Astropy is potentially possible with modern large-language model coding tools using the AFW code as a reference, but it would be preferable to avoid this situation.
+Additionally, we are formally required to fully document how to read the files we ship to the community, and so are motivated to ship a file format that can be described relatively straightforwardly.
+
+\emph{Didn't we have one component that was a pickle inside the binary table?}
 
 The requirement to read the archive index does have other ramifications.
 The system was designed in an era when there was an assumption that the file would always be available on a POSIX file system.
@@ -224,12 +237,263 @@ The simplest option would be to download the entire file to local storage and th
 To avoid downloading megabytes of pixel data, instead what we have to do is construct fake single-pixel image HDUs for the image/variance/mask arrays and then download all the extension HDUs so we can write a file locally and use the AFW code to read the index and then construct the extension.
 This is not efficient but is an inevitable outcome of the approach.
 
-\section{The DP2 Data Model}
+\section{Changing Approach for DP2}
+
+Given the discussion above, we decided that for DP2 we would change the way we represent image datasets in Python and also change how we serialize them.
+Our main requirements were:
+
+\begin{itemize}
+
+  \item The main implementation language should be Python rather than C++.
+  \item Each image dataset type (such as visit images, difference images, co-adds) should be represented by its own Python class.
+  This allows each dataset type to define only the components that are directly relevant to that type.
+  It also allows more type safety in the pipelines rather than always assuming a generic image container.
+  \item Informed by the experience with the Advanced Scientific Data Format (ASDF)\cite{2015A&C....12..240G}, the data models written to the file must be associated with public formal schemas.
+  \item It should be possible to locate and read a component efficiently.
+  \item People should be able to install software to read the files with our data models with only a \texttt{pip install} and the FITS files must be usable from Astropy and general viewing tools.
+\end{itemize}
+
+One additional input into the process was to make a conscious effort to distinguish the data model from the serialization format.
+Separating the model from the file format has been a long-running debate in the community\cite{2019ASPC..521..733C} as we discuss the limitations of the FITS format\cite{2015A&C....12..133T} and the possibilities for being more flexible in terms of archival artifacts being produced.
+
+\subsection{The New Data Model}
+
+The most fundamental part of the data model is the \texttt{Image} class.
+This contains a two-dimensional Numpy data array with a pixel origin and units, a projection that can map pixels to world coordinates, a generic metadata data class that can describe an observation (\emph{Maybe it was a mistake to add ObservationInfo to Image given the discussion above}) as well as some simple keyword/value metadata support.
+
+There is also a \texttt{Mask} class which is similar to \texttt{Image} except it has an additional schema that describes the mask planes (bit numbers, mask name, mask description) and internally is represented as a three-dimensional array even though the external interface is a two-dimensional array.
+The third dimension uses unsigned bytes to allow arbitrary numbers of mask planes to be stored efficiently in groups of eight without being constrained to jump from 32 mask planes directly to 64.
+
+Additional components are represented by using Python Pydantic models\cite{2025zndo..15662245C} which provide validation and can define formal schemas.
+We have reimplemented the AFW component classes in Python, including bounded fields, aperture correction maps, and PSFs and these are used for the new \texttt{VisitImage} class.
+Additionally there is a \texttt{ColorImage} class that consists of three images (red, green, and blue) and a \texttt{CellCoadd} that represents a modern implementation of our cell co-add types.\cite{DMTN-294,SITCOMTN-137}
+The system has been designed to allow flexibility in image classes but with a standardized serialization system.
+
+\subsection{Schema Management}
 
 
 
-\subsection{FITS Serialization}
+\subsection{Serialization System}
 
-\subsection{HDF5 Serialization}
+A conscious design decision was to abstract the file output from the serialization infrastructure...
+
+
+\subsubsection{FITS Serialization}
+
+\begin{figure}[ht]
+  \begin{center}
+    \begin{small}
+      \begin{verbatim}
+Filename: dp1.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU     689   ()
+  1  IMAGE         1 CompImageHDU     74   (4072, 4000)   float32
+  2  MASK          1 CompImageHDU    109   (4072, 4000)   int32
+  3  VARIANCE      1 CompImageHDU     74   (4072, 4000)   float32
+  4  PSF/PIFF/INTERP/SOLUTION    1 BinTableHDU     12   1R x 1C   [9375D]
+  5  JSON          1 BinTableHDU     11   1R x 1C   [PB(65720)]
+  6  INDEX         1 BinTableHDU     23   6R x 7C   [24A, J, 8A, L, K, K, K]
+      \end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{A DP1 visit image converted to the new FITS serialization.}
+  \label{fig:new-fits}
+\end{figure}
+
+For FITS output we continue to write the image, mask, and variance to individual HDUs but the primary FITS header contains some additional keys to aid the deserialization tools.
+These headers are:
+
+\begin{description}
+  \item[\textbf{INDXADDR}]
+  The byte offset to the start of the HDU containing the HDU index.
+  \item[\textbf{INDXSIZE}]
+  The size of the index HDU in bytes.
+  \item[\textbf{JSONADDR}]
+  The byte offset to the start of the HDU containing the JSON data model.
+  \item[\textbf{JSONSIZE}]
+  The size of the JSON HDU.
+\end{description}
+
+These can be used to allow remote reading of a FITS file to allow the bare minimum of remote reads to determine the contents of the file.
+We always try to write a FITS WCS to the headers of each image HDU, although this will sometimes have to be an approximation in some cases.
+
+The \texttt{JSON} HDU contains the primary data model as JSON serialized from a Pydantic model.
+When the model contains large arrays of numbers those are pulled out of the JSON serialization and stored in FITS binary tables.
+A reference to the FITS HDU is included in the JSON serialization so that on read the data can be located.
+
+\subsubsection{HDF5 Serialization}
+
+\begin{figure}[ht]
+  \begin{center}
+    \begin{small}
+\begin{verbatim}
+VisitImage  <NDF>
+
+   DATA_ARRAY     <ARRAY>         {structure}
+      DATA(4072,4000)  <_REAL>       -6.884751,-6.867677,-6.850569,-6.833529,-6.816523,
+                                     ... -5.511999,-5.517168,-5.522304,-5.527539,-5.532708
+      ORIGIN(2)      <_INT64>        0,0
+
+   MORE           <EXT>           {structure}
+      FITS(693)      <_CHAR*80>      'COMMENT   FITS (Flexible Image Transport System) format...'
+                                     ... 'HIERARCH HAS-SIMULA...','EXPID   =          45508261376'
+      LSST           <LSST>          {structure}
+         JSON(1)        <_CHAR*88307>   '{"image":{"data":{"value":{"source":"ndf:/DATA_ARRAY/...'
+         MASK           <NDF>           {structure}
+            DATA_ARRAY     <ARRAY>         {structure}
+               BAD_PIXEL      <_LOGICAL>      FALSE
+               DATA(4072,4000,2)  <_UBYTE>    49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,
+                                              ... 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+               ORIGIN(3)      <_INT64>        0,0,0
+
+            WCS            <WCS>           {structure}
+               DATA(337)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Currnt = 3',
+                                              ' End UnitMap',' End CmpMap',' End FrameSet'
+
+         PSF            <PSF>           {structure}
+            PIFF           <PIFF>          {structure}
+               INTERP         <INTERP>        {structure}
+                  SOLUTION       <NDF>           {structure}
+                     DATA_ARRAY     <ARRAY>         {structure}
+                        DATA(15,625,1)  <_DOUBLE>      -8.80450720119882D-5,
+                                                       ... 4.17704930562368D-14
+                        ORIGIN(3)      <_INT64>        0,0,0
+
+   QUALITY        <QUALITY>       {structure}
+      BADBITS        <_UBYTE>        *
+      QUALITY        <ARRAY>         {structure}
+         BAD_PIXEL      <_LOGICAL>      FALSE
+         DATA(4072,4000)  <_UBYTE>      1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+                                        ... 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+         ORIGIN(2)      <_INTEGER>      0,0
+
+   UNITS          <_CHAR*3>       'nJy'
+   VARIANCE       <ARRAY>         {structure}
+      DATA(4072,4000)  <_REAL>       272.9544,272.951,272.9477,272.9443,272.9409,272.9376,
+                                     ... 259.7251,259.7245,259.7239,259.7233,259.7228,259.7221
+      ORIGIN(2)      <_INT64>        0,0
+
+   WCS            <WCS>           {structure}
+      DATA(312)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
+                                     ' Sft1 = 1',' Sft2 = 1',' End ShiftMap',' End FrameSet'
+
+End of Trace.
+\end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{The structure of the HDF5 representation of a DP1 visit FITS file converted to use the NDF data model. This is the output from the Starlink \texttt{hdstrace} command, which uses HDF5 group attributes to match the Starlink HDS semantics.}
+  \label{fig:dp1-ndf}
+\end{figure}
+
+To demonstrate that the serialization interface was flexible and not FITS-specific, we decided to also write an HDF5 plugin.
+We chose to use the Starlink N-Dimensional Data Format (NDF) data model\cite{2015A&C....12..146J} layered on the Starlink Hierarchical Data System (HDS) abstraction over HDF5.\cite{2015A&C....12..221J}
+
+Our \texttt{MaskedImage} maps almost directly onto NDF: the image and variance arrays support pixel origin and units, and the WCS is represented by an AST native serialization.
+The model also has a convention for including direct support for FITS header cards, stored as an extension in a character array.
+There is one slight model mismatch concerning mask planes.
+NDF has a ``quality'' array corresponding to the mask but is limited to only 8 mask planes, whereas we can support an arbitrary number.
+
+For the more complex data models NDF provides sufficient flexibility to be able to represent them, although there is no native support for tabular data.
+When there is additional information associated with a single image the convention is to place that in the extension ``airlock'' indicated by \texttt{.MORE}.
+This section can contain arbitrary additional structure and is where we write the JSON model.
+If there are multiple top-level images or masked images in the Python representation we would instead write those at the top level and the JSON component would also be at the top level since it is shared between all the images.
+
+\subsubsection{VisitImage}
+
+Fig.~\ref{fig:dp1-ndf} shows the NDF equivalent of the FITS file listed in Fig.~\ref{fig:new-fits}.
+There is inherently more structure in the NDF representation.
+Here a \texttt{QUALITY} component is created from a collapsed version of the full 32-bit mask, to enable standard Starlink applications to view a form of the mask.
+The full mask is located at \texttt{MORE/LSST/MASK} and stores the 3-D version of the mask.
+The Pydantic model itself is located at \texttt{MORE/LSST/JSON} and internally it references explicit numerical components of the main file.
+
+\begin{lstlisting}[caption=PIFF solution in Pydantic model referencing a data component., language=json, label={lst:piff-ndf}]
+"interp": {
+  "tables": {
+    "solution": {
+      "metadata": {},
+      "table": {
+        "columns": [
+          {
+            "data": {
+              "source": "ndf:/MORE/LSST/PSF/PIFF/INTERP/SOLUTION/DATA_ARRAY/DATA",
+              "shape": [
+                625,
+                15
+              ],
+              "datatype": "float64",
+              "byteorder": "big"
+            },
+            "name": "q"
+          }
+        ]
+      }
+    }
+  }
+}
+\end{lstlisting}
+
+Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array in the HDF5 hierarchy.
+The NDF writes a 3-D version of the array because there is an implicit counter from the row count.
+
+\subsubsection{ColorImage}
+
+\begin{figure}[ht]
+  \begin{center}
+    \begin{small}
+\begin{verbatim}
+ColorImage  <EXT>
+
+   BLUE           <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        180,195,233,192,127,216,137,62,43,114,26,78,157,128,
+                                        ... 224,135,109,79,136,237,29,63,4,42,121,135,160,142,131
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
+                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
+
+   GREEN          <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        209,3,200,106,54,88,31,99,143,45,112,77,157,156,36,
+                                        ... 65,107,202,225,27,239,103,111,109,178,11,149,139,24
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
+                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
+
+   LSST           <LSST>           {structure}
+      JSON(1)        <_CHAR*12703>   '{"red":{"data":{"source":"ndf:/RED/DATA_ARRAY/DATA","sha...'
+
+   RED            <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        86,172,68,196,13,110,180,176,133,126,47,187,116,228,
+                                        ... 89,172,226,205,215,201,135,239,106,160,129,88,115,175
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
+                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
+
+End of Trace.
+\end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{The structure of the HDF5 representation of a RGB color image serialized with the NDF data model.}
+  \label{fig:color-ndf}
+\end{figure}
+
+A \texttt{ColorImage} is an image with WCS that represents three color channels.
+In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the \texttt{/LSST/JSON} character array.
+This demonstrates that we can use the hierarchy in multiple ways to group related concepts.
 
 \section{Conclusion}
+
+Our initial serialization system converting C++ data models to FITS that was developed in the early days of the LSST construction project\cite{2010SPIE.7740E..15A} did not meet our expectations in terms of cloud storage performance or ability to provide clear documentation to the community.
+We have developed a new approach that uses bespoke classes for different image types to replace an approach where a single class has to represent all possible metadata extensions.
+This has been coupled with an abstract file serialization system that lets us write the image data out in formats such as FITS and HDF5.
+To aid with cloud performance we are also proposing a new FITS convention whereby we store an index containing the byte offsets of each HDU.
+The intent is to switch to this new FITS format for Data Preview 2 which will be released in the second half of 2026.
+
+\clearpage
