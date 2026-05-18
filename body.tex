@@ -2,14 +2,14 @@
 
 The NSF-DOE Vera C.\ Rubin Observatory is designed to take data for the Legacy Survey of Space and Time over a period of 10 years.\cite{2019ApJ...873..111I}.
 We made our first data preview release (DP1) in 2025 using data from our commissioning camera\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from LSSTCam.\cite{10.71929/rubin/2571927,RTN-111}
-For DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS headers.
+For all the Hyper Suprime-Cam Subaru (HSC) Strategic Program (SSP) data releases\cite{2022PASJ...74..247A} and for DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS files.
 The resultant FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque data that required specific Rubin science pipeline software\cite{PSTN-019} to interpret.
 In this paper we will describe the FITS layout we used for DP1 and describe its limitations.
 Then we will present our new approach to modeling our data structures and how we represent it in both FITS and HDF5 files.
 
 \section{The Rubin Visit Image Data Model}
 
-The most complex image dataset type we write are those from our visit images.
+One of the most complex image dataset types we write are those associated with our visit images.
 At Rubin we define ``visit'' as an on-sky exposure.
 During construction we had planned to support an observing mode where two on-sky exposures would be taken sequentially without moving the telescope or instrument rotator and those would be called a visit.
 This changed during commissioning when we decided to drop the two-exposure mode and so now a visit is always a single on-sky exposure.
@@ -33,6 +33,8 @@ We will not consider calibration datasets any further in this discussion since t
 \subsection{Filter Label}
 
 This is a small look up table defining the physical filter used for the observation and the waveband for that filter.
+In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} we attempted to store a more complex filter type that tried to record filter widths and centers, but we decided that this led to discrepancies between the measured filter profiles and the data files when profiles were recalculated.
+It is much simpler to store the physical filter name itself and then use that as a look up table into an external data set.
 
 \subsection{Detector Information}
 
@@ -68,6 +70,7 @@ For most detectors, the valid polygon is just the detector's bounding box, but t
 
 Multiple aperture corrections can be stored, each one being labeled and associated with a bounded field.
 Different measurement algorithms can result in different aperture corrections and the user can select the appropriate one.
+Each photometry algorithm has its own aperture correction, which is used to tie that algorithm to a common photometric system.
 
 \subsection{Transmission Curve}
 
@@ -122,7 +125,7 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
 A summary of the layout of a FITS file produced for DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
 The pixel data use standard FITS data arrays with compression to represent the primary image data, the variance, and the mask.
 The mask image is a 2-d 32-bit integer array supporting 32 individual mask planes.
-\emph{How do we know the names of each mask plane? Is it hardcoded in afw?}
+A set of common mask planes is hard-coded into AFW itself to enforce standardization of the core planes, while others are defined by pipeline tasks that add them to the images they write out.
 
 The FITS primary header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
 In general it is not possible to accurately represent the world coordinates of a visit image using the standard FITS-WCS approach.
@@ -160,6 +163,7 @@ The components themselves are serialized in different ways.
 
   This is a very simple table with two rows.
   One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
+  These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
 
   \item[\textbf{Detector}]
 
@@ -192,8 +196,7 @@ This is a simple table that associates the name of the correction with a referen
 
 These define the bounded fields referenced from other HDUs.
 Each row defines the Chebyshev order, the bounding box for which the polynomial is valid and the polynomial coefficients.
-
-\emph{Why do we end up with two HDUs with Chebyshev fields? Is it because there are different coefficient counts?}
+In the example output there are two HDUs labeled as Chebyshevs because there are different coefficient counts in use.
 
 \item[\textbf{ExposureSummaryStats}]
 
@@ -207,6 +210,10 @@ The PSF component is polymorphic.
 AFW only sees it through the persistable interface.
 The actual FITS representation depends on the concrete PSF class and its registered factory.
 For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
+The PIFF serialization uses the Python storable interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
+At the time there was no standardized PIFF serialization we could persist other than Pickle (a situation which has now been fixed).
+This decision was the pragmatic one at the time but it means that a user reading our files without using our code \emph{must} use Python to reconstruct the PIFF object and does not have the option of implementing their own equivalent in another language.
+The use of Pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
 
 \end{description}
 
@@ -225,10 +232,9 @@ As described previously, multiple components can also be written to the same HDU
 In order to understand what each extension is part of you must first read the index extension.
 
 The complex logic effectively requires an end-user uses the \texttt{lsst.afw} Python classes to read the extensions.
-Re-implementing the logic in Astropy is potentially possible with modern large-language model coding tools using the AFW code as a reference, but it would be preferable to avoid this situation.
+Re-implementing the logic in Astropy or a language other than Python or C++ is potentially possible for a highly motivated individual (and with modern large-language model coding tools using the AFW code as a reference someone might be tempted to try it), but it would be preferable to avoid this situation (and the associated need to create corresponding non-AFW classes for all the components) if at all possible.
 Additionally, we are formally required to fully document how to read the files we ship to the community, and so are motivated to ship a file format that can be described relatively straightforwardly.
-
-\emph{Didn't we have one component that was a pickle inside the binary table?}
+Using Pickles for the current format makes documentation effectively impossible.
 
 The requirement to read the archive index does have other ramifications.
 The system was designed in an era when there was an assumption that the file would always be available on a POSIX file system.
@@ -296,6 +302,13 @@ A Python class doesn't know whether it lives in a FITS HDU list or an HDS struct
 Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (which knows where to put bytes) and its own referencing type (which knows how to spell a pointer to those bytes).
 Adding a fourth backend means writing those three pieces; no Python class needs to change.
 Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
+
+\subsubsection{JSON Serialization}
+
+Pydantic models serialize to JSON as a native form and we have included support for a JSON serialization that also includes the numeric arrays.
+The main reason for doing this is to allow components (that might have a few thousand data values in an ancillary array) to be serialized with the Butler in a simpler text-based form, but the system is also able to serialize the full image types.
+For example, serializing a DP1 \texttt{VisitImage} to JSON results in a 600MB JSON file that can be compressed using Zstd to 200MB.
+We would not use full image JSON serialization in production but it does demonstrate the abstraction layer works.
 
 \subsubsection{FITS Serialization}
 
