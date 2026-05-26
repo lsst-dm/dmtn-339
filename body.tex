@@ -430,7 +430,7 @@ When there is additional information associated with a single image the conventi
 This section can contain arbitrary additional structure and is where we write the JSON model.
 If there are multiple top-level images or masked images in the Python representation we would instead write those at the top level and the JSON component would also be at the top level since it is shared between all the images.
 
-\subsubsection{VisitImage}
+\paragraph{VisitImage}
 
 Fig.~\ref{fig:dp1-ndf} shows the NDF equivalent of the FITS file listed in Fig.~\ref{fig:new-fits}.
 There is inherently more structure in the NDF representation.
@@ -467,7 +467,7 @@ The Pydantic model itself is located at \texttt{MORE/LSST/JSON} and internally i
 Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array in the HDF5 hierarchy.
 The NDF writes a 3-D version of the array because there is an implicit counter from the row count.
 
-\subsubsection{ColorImage}
+\paragraph{ColorImage}
 
 \begin{figure}[ht]
   \begin{center}
@@ -519,6 +519,16 @@ End of Trace.
 A \texttt{ColorImage} is an image with WCS that represents three color channels.
 In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the \texttt{/LSST/JSON} character array.
 This demonstrates that we can use the hierarchy in multiple ways to group related concepts.
+
+\section{Future Work}
+
+Now that we have demonstrated that the serialization system is general enough to support 3 output formats the next goal is to investigate other formats that have been mentioned by the community.
+Whilst it is not required that we support formats other than FITS, we feel that adding different formats and output data models can make the system more robust and expose bad assumptions.
+
+There are two additional file formats that have been requested.
+The first is ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data.
+The other format being considered is the Zarr format, which is designed to be highly performant in the cloud with very efficient retrieval of image subsets and metadata.
+
 
 \section{Conclusion}
 
