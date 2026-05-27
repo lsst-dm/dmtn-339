@@ -305,6 +305,35 @@ Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (whic
 Adding a fourth backend means writing those three pieces; no Python class needs to change.
 Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
 
+\begin{lstlisting}[caption=PIFF solution in Pydantic model referencing a data component., language=json, label={lst:piff-ndf}]
+"interp": {
+  "tables": {
+    "solution": {
+      "metadata": {},
+      "table": {
+        "columns": [
+          {
+            "data": {
+              "source": "ndf:/MORE/LSST/PSF/PIFF/INTERP/SOLUTION/DATA_ARRAY/DATA",
+              "shape": [
+                625,
+                15
+              ],
+              "datatype": "float64",
+              "byteorder": "big"
+            },
+            "name": "q"
+          }
+        ]
+      }
+    }
+  }
+}
+\end{lstlisting}
+
+Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array, which in this example is a path in the HDF5 hierarchy.
+This is tabular data and the serializer has the option of representing this as a table natively in the output file or instead representing it as separate columns that can be reconstructed on read into a table if the file format does not have native table support.
+
 \subsubsection{JSON Serialization}
 
 Pydantic models serialize to JSON as a native form and we have included support for a JSON serialization that also includes the numeric arrays.
@@ -431,35 +460,6 @@ There is inherently more structure in the NDF representation.
 Here a \texttt{QUALITY} component is created from a collapsed version of the full 32-bit mask, to enable standard Starlink applications to view a form of the mask.
 The full mask is located at \texttt{MORE/LSST/MASK} and stores the 3-D version of the mask.
 The Pydantic model itself is located at \texttt{MORE/LSST/JSON} and internally it references explicit numerical components of the main file.
-
-\begin{lstlisting}[caption=PIFF solution in Pydantic model referencing a data component., language=json, label={lst:piff-ndf}]
-"interp": {
-  "tables": {
-    "solution": {
-      "metadata": {},
-      "table": {
-        "columns": [
-          {
-            "data": {
-              "source": "ndf:/MORE/LSST/PSF/PIFF/INTERP/SOLUTION/DATA_ARRAY/DATA",
-              "shape": [
-                625,
-                15
-              ],
-              "datatype": "float64",
-              "byteorder": "big"
-            },
-            "name": "q"
-          }
-        ]
-      }
-    }
-  }
-}
-\end{lstlisting}
-
-Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array in the HDF5 hierarchy.
-The NDF writes a 3-D version of the array because there is an implicit counter from the row count.
 
 \paragraph{ColorImage}
 
