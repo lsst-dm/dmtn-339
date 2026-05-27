@@ -100,29 +100,29 @@ This design decision has caused confusion over the years, because the consequenc
 \begin{small}
 \begin{verbatim}
 No.    Name      Ver    Type      Cards   Dimensions   Format
-  0  PRIMARY       1 PrimaryHDU     722   ()
-  1  IMAGE         1 CompImageHDU     72   (256, 250)   float32
-  2  MASK          1 CompImageHDU     88   (256, 250)   int32
-  3  VARIANCE      1 CompImageHDU     72   (256, 250)   float32
-  4  ARCHIVE_INDEX    1 BinTableHDU     41   429R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
+  0  PRIMARY       1 PrimaryHDU     707   ()
+  1  IMAGE         1 CompImageHDU     71   (4072, 4000)   float32
+  2  MASK          1 CompImageHDU     93   (4072, 4000)   int32
+  3  VARIANCE      1 CompImageHDU     71   (4072, 4000)   float32
+  4  ARCHIVE_INDEX    1 BinTableHDU     41   93R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
   5  FilterLabel    1 BinTableHDU     28   1R x 3C   [2X, 32A, 32A]
-  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, 1QA(14), 1J, ..., 1J]
-  7  TransformMap    1 BinTableHDU     33   411R x 5C   [1QA(10), 1QA(7), 1QA(10), 1QA(7), 1J]
-  8  ExposureSummaryStats    1 BinTableHDU     18   412R x 1C   [1QB(3410)]
-  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), 1J, ..., 1D, 1QA(2)]
- 10  Polygon       1 BinTableHDU     21   5R x 2C   [1D, 1D]
- 11  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(16161), 1QB(10442)]
- 12  PsfexPsf      1 BinTableHDU     52   1R x 9C   [1J, 1J, 1J, 1J, 1J, 1J, 1D, 1D, 1E]
- 13  PsfexPsf      2 BinTableHDU     46   1R x 8C   [2J, 1J, 6D, 6D, 3J, 41334E, 2D, 2D]
- 14  ApCorrMap     1 BinTableHDU     21   6R x 2C   [64A, 1J]
- 15  ChebyshevBoundedField    1 BinTableHDU     41   5R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
- 16  ChebyshevBoundedField    2 BinTableHDU     42   2R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
- 17  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
+  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, 1QA(13), 1J, 1J, ... 1QA(3), 1J]
+  7  TransformMap    1 BinTableHDU     33   19R x 5C   [1QA(10), 1QA(7), 1QA(10), 1QA(7), 1J]
+  8  ExposureSummaryStats    1 BinTableHDU     19   21R x 1C   [1QB(102617)]
+  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), 1J, 1J, 1J, 1J, 1D, ..., 1QA(2)]
+ 10  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(10399), 1QB(10437)]
+ 11  ApCorrMap     1 BinTableHDU     21   64R x 2C   [64A, 1J]
+ 12  ChebyshevBoundedField    1 BinTableHDU     41   34R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
+ 13  ChebyshevBoundedField    2 BinTableHDU     42   31R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
+ 14  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
+ 15  Polygon       1 BinTableHDU     21   5R x 2C   [1D, 1D]
+ 16  PsfexPsf      1 BinTableHDU     52   1R x 9C   [1J, 1J, 1J, 1J, 1J, 1J, 1D, 1D, 1E]
+ 17  PsfexPsf      2 BinTableHDU     46   1R x 8C   [2J, 1J, 6D, 6D, 3J, 41334E, 2D, 2D]
 \end{verbatim}
 \end{small}
 \end{center}
 \label{fig:old-layout}
-\caption{The structure of a slice of a representative FITS file using the legacy schema.}
+\caption{The structure of a representative DP1 FITS file using the legacy schema.}
 \end{figure}
 
 
