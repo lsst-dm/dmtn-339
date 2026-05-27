@@ -266,7 +266,7 @@ Separating the model from the file format has been a long-running debate in the 
 \subsection{The New Data Model}
 
 The most fundamental part of the data model is the \texttt{Image} class.
-This contains a two-dimensional Numpy data array with a pixel origin and units, a projection that can map pixels to world coordinates, a generic metadata data class that can describe an observation (\emph{Maybe it was a mistake to add ObservationInfo to Image given the discussion above}) as well as some simple keyword/value metadata support.
+This contains a two-dimensional Numpy data array with a pixel origin and units, a projection that can map pixels to world coordinates, as well as some simple keyword/value metadata support.
 
 There is also a \texttt{Mask} class which is similar to \texttt{Image} except it has an additional schema that describes the mask planes (bit numbers, mask name, mask description) and internally is represented as a three-dimensional array even though the external interface is a two-dimensional array.
 The third dimension uses unsigned bytes to allow arbitrary numbers of mask planes to be stored efficiently in groups of eight without being constrained to jump from 32 mask planes directly to 64.
@@ -277,7 +277,9 @@ We have decided that where a model has an equivalent definition in the ASDF sche
 We do not directly use the ASDF schema definitions but we do define ASDF-compatible variants for dealing with Astropy quantities, units, N-dimensional arrays, time, and table columns.
 
 We have reimplemented the AFW component classes in Python, including bounded fields, aperture correction maps, and PSFs and these are used for the new \texttt{VisitImage} class.
-Additionally there is a \texttt{ColorImage} class that consists of three images (red, green, and blue) and a \texttt{CellCoadd} that represents a modern implementation of our cell co-add types.\cite{DMTN-294,SITCOMTN-137}
+Additionally, we use a more general observation metadata model instead of \texttt{VisitInfo}.
+
+In the initial set there is also a \texttt{ColorImage} class that consists of three images (red, green, and blue) and a \texttt{CellCoadd} that represents a modern implementation of our cell co-add types.\cite{DMTN-294,SITCOMTN-137}
 The system has been designed to allow flexibility in image classes but with a standardized serialization system.
 
 \subsection{Serialization System}
@@ -520,15 +522,51 @@ A \texttt{ColorImage} is an image with WCS that represents three color channels.
 In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the \texttt{/LSST/JSON} character array.
 This demonstrates that we can use the hierarchy in multiple ways to group related concepts.
 
+\subsubsection{Zarr Serialization}
+
+The Zarr file format\footnote{\url{https://zarr.dev}}\cite{10.5281/zenodo.3773449} is a cloud-optimized format designed for object stores.
+This is a relatively new format but it is being adopted by machine learning, bioimaging and geophysics communities.\cite{10.1175/JTECH-D-21-0106.1,10.1007/s00418-023-02209-1,10.1190/tle42070465.1}
+The format is implemented as a hierarchical tree with metadata and compressed binary data kept as separate files and supporting chunking and sharding of large datasets to allow very efficient subsetting.
+
+We have created an experimental Zarr writer that adopts standards from other scientific communities to try to maximize compatibility with existing tooling.
+We use the xarray / Climate and Forecasting conventions\footnote{\url{https://cfconventions.org}} for labeling data arrays and defining masks and also OME-NGFF\cite{10.1007/s00418-023-02209-1} conventions for multiscale support and simple affine transformation specifications where possible.
+By default we are using 256 $\times$ 256 pixel chunks with 16MB shards but we have not yet attempted to tune these parameters in a cloud environment.
+In particular, we would like to consider whether out cutout service performance could be improved if we were to adopt Zarr instead of FITS.\cite{DMTN-326}
+One obvious downside of that would be that we are required to serve the FITS files and would therefore have to double the storage cost to also store some data products in Zarr format.
+
+The JSON pydantic model and the WCS are serialized as JSON using an LSST-specific naming convention since there is no existing standard for these data models.
+An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:zarr}.
+
+\begin{lstlisting}[caption=Overview of the Zarr layout for a \texttt{VisitImage}, label={lst:zarr}]
+/
+|-- image (4000, 4072) float32
+|-- lsst
+|   |-- opaque_metadata
+|   |   `-- fits
+|   |       `-- primary (720, 80) uint8
+|   `-- tables
+|       `-- psf
+|           `-- piff
+|               `-- interp
+|                   `-- solution
+|                       `-- q (1, 625, 15) float64
+|-- lsst_json (88349,) uint8
+|-- mask (4000, 4072) uint16
+`-- variance (4000, 4072) float32
+\end{lstlisting}
+
 \section{Future Work}
 
-Now that we have demonstrated that the serialization system is general enough to support 3 output formats the next goal is to investigate other formats that have been mentioned by the community.
+Now that we have demonstrated that the serialization system is general enough to support 4 output formats the next goal is to investigate other formats that have been mentioned by the community.
 Whilst it is not required that we support formats other than FITS, we feel that adding different formats and output data models can make the system more robust and expose bad assumptions.
 
-There are two additional file formats that have been requested.
-The first is ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data.
-The other format being considered is the Zarr format, which is designed to be highly performant in the cloud with very efficient retrieval of image subsets and metadata.
+There is one additional file format that has been considered and it is ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data.
+We already share some common data models with ASDF, although we have no formal linkage to their schemas.
+ASDF uses a GWCS serialization\cite{2017ASPC..512..609D} to represent world coordinates and the AST library does include support for using that model export serialiation, although we might need to expand that support if there are mappings we use in AST that have no equivalent in GWCS.
+For the other data models we would have to investigate whether any of them warrant an attempt to expand the current formal ASDF schemas or whether we should treat them as non-standard extensions.
 
+One further image type we intend to add is a class to represent multiple masked image cutouts.
+We will need something like this to represent outputs from our bulk cutout system\cite{DMTN-326} and using this serialization approach gives us some flexibility as to whether we serialize in the simpler ``collection of images'' way (such as using HDUs for each cutout) or a more compact approach favored by ML tooling such as the MultimodalUniverse\cite{2024RNAAS...8..301A} who recommend a N-dimensional arrays having all the cutout pixels in one place.
 
 \section{Conclusion}
 
