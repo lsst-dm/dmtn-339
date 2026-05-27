@@ -130,7 +130,7 @@ A set of common mask planes is hard-coded into AFW itself to enforce standardiza
 The FITS primary header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
 In general it is not possible to accurately represent the world coordinates of a visit image using the standard FITS-WCS approach.
 We therefore store an approximation of the WCS in the headers in SIP form\cite{2005ASPC..347..491S} so that tools like Astropy\cite{2013A&A...558A..33A} and Firefly\cite{2019ASPC..521...32W} can see some coordinates.
-For DP1 these approximations were good to a few milliarcseconds, i.e. around the astrometric precision of the true WCS, but this may not always be true in the future.
+For DP1 these approximations were good to a few milliarcseconds, i.e., around the astrometric precision of the true WCS, but this may not always be true in the future.
 
 The \texttt{VisitInfo} struct also serializes into the FITS primary header.
 We now consider this to be an anti-pattern because the keywords are not namespaced.
@@ -348,8 +348,11 @@ These headers are:
   The size of the JSON HDU.
 \end{description}
 
-These can be used to allow remote reading of a FITS file to allow the bare minimum of remote reads to determine the contents of the file.
-We always try to write a FITS WCS to the headers of each image HDU, although this will sometimes have to be an approximation.
+At our scale, especially with the hybrid data center model we have had to adopt,\cite{2024SPIE13101E..2BO} it is critical for performance to reduce the number of server round trips when performing a cutout\cite{DMTN-208} and the index allows us to efficiently skip to exactly the HDUs that we need to read without having to scan the entire file.
+We are intending to submit the index HDU as a registered FITS convention once we can obtain some performance numbers.
+
+As discussed above for DP1 data, although our WCS fits are not always representable as standard FITS-WCS headers, we always try to write a FITS WCS to the headers of each image HDU.
+For co-adds this will be an accurate model but it will be an approximation for visit images and for LSSTCam visits the accuracy will be slightly worse at the edges of the focal plane than it was for LSSTComCam DP1 data.
 
 The \texttt{JSON} HDU contains the primary data model as JSON serialized from a Pydantic model.
 When the model contains large arrays of numbers those are pulled out of the JSON serialization and stored in FITS binary table or image HDUs.
