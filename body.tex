@@ -357,15 +357,12 @@ A reference to the FITS HDU is included in the JSON serialization so that on rea
 
 \subsubsection{HDF5 Serialization}
 
-\begin{figure}[ht]
+\begin{figure}[!tbp]
   \begin{center}
     \begin{small}
 \begin{verbatim}
-VisitImage  <NDF>
-
    DATA_ARRAY     <ARRAY>         {structure}
-      DATA(4072,4000)  <_REAL>       -6.884751,-6.867677,-6.850569,-6.833529,-6.816523,
-                                     ... -5.511999,-5.517168,-5.522304,-5.527539,-5.532708
+      DATA(4072,4000)  <_REAL>       -6.884751,-6.867677,-6.850569, ... -5.527539,-5.532708
       ORIGIN(2)      <_INT64>        0,0
 
    MORE           <EXT>           {structure}
@@ -376,42 +373,34 @@ VisitImage  <NDF>
          MASK           <NDF>           {structure}
             DATA_ARRAY     <ARRAY>         {structure}
                BAD_PIXEL      <_LOGICAL>      FALSE
-               DATA(4072,4000,2)  <_UBYTE>    49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,49,
-                                              ... 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+               DATA(4072,4000,2)  <_UBYTE>    49,49,49,49,49,49,49,49, ... 0,0,0,0,0
                ORIGIN(3)      <_INT64>        0,0,0
 
             WCS            <WCS>           {structure}
-               DATA(337)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Currnt = 3',
-                                              ' End UnitMap',' End CmpMap',' End FrameSet'
+               DATA(337)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
 
          PSF            <PSF>           {structure}
             PIFF           <PIFF>          {structure}
                INTERP         <INTERP>        {structure}
                   SOLUTION       <NDF>           {structure}
                      DATA_ARRAY     <ARRAY>         {structure}
-                        DATA(15,625,1)  <_DOUBLE>      -8.80450720119882D-5,
-                                                       ... 4.17704930562368D-14
+                        DATA(15,625,1)  <_DOUBLE>      -8.80450720119882D-5, ... 4.17704930562368D-14
                         ORIGIN(3)      <_INT64>        0,0,0
 
    QUALITY        <QUALITY>       {structure}
       BADBITS        <_UBYTE>        *
       QUALITY        <ARRAY>         {structure}
          BAD_PIXEL      <_LOGICAL>      FALSE
-         DATA(4072,4000)  <_UBYTE>      1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
-                                        ... 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+         DATA(4072,4000)  <_UBYTE>      1,1,1,1,1,1,1,1,1,1,1,1, ... 1,1,1,1,1,1,1
          ORIGIN(2)      <_INTEGER>      0,0
 
    UNITS          <_CHAR*3>       'nJy'
    VARIANCE       <ARRAY>         {structure}
-      DATA(4072,4000)  <_REAL>       272.9544,272.951,272.9477,272.9443,272.9409,272.9376,
-                                     ... 259.7251,259.7245,259.7239,259.7233,259.7228,259.7221
+      DATA(4072,4000)  <_REAL>       272.9544,272.951,272.9477, ... 259.7228,259.7221
       ORIGIN(2)      <_INT64>        0,0
 
    WCS            <WCS>           {structure}
-      DATA(312)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
-                                     ' Sft1 = 1',' Sft2 = 1',' End ShiftMap',' End FrameSet'
-
-End of Trace.
+      DATA(312)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
 \end{verbatim}
     \end{small}
   \end{center}
@@ -471,46 +460,36 @@ The NDF writes a 3-D version of the array because there is an implicit counter f
 
 \paragraph{ColorImage}
 
-\begin{figure}[ht]
+\begin{figure}[!tbp]
   \begin{center}
     \begin{small}
 \begin{verbatim}
-ColorImage  <EXT>
-
    BLUE           <NDF>           {structure}
       DATA_ARRAY     <ARRAY>         {structure}
-         DATA(8,5)      <_UBYTE>        180,195,233,192,127,216,137,62,43,114,26,78,157,128,
-                                        ... 224,135,109,79,136,237,29,63,4,42,121,135,160,142,131
+         DATA(8,5)      <_UBYTE>        180,195,233,192,127,216,137,62,... 135,160,142,131
          ORIGIN(2)      <_INT64>        40,20
 
       WCS            <WCS>           {structure}
-         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
-                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
 
    GREEN          <NDF>           {structure}
       DATA_ARRAY     <ARRAY>         {structure}
-         DATA(8,5)      <_UBYTE>        209,3,200,106,54,88,31,99,143,45,112,77,157,156,36,
-                                        ... 65,107,202,225,27,239,103,111,109,178,11,149,139,24
+         DATA(8,5)      <_UBYTE>        209,3,200,106,54,88,31,99,143, ... 149,139,24
          ORIGIN(2)      <_INT64>        40,20
 
       WCS            <WCS>           {structure}
-         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
-                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
 
    LSST           <LSST>           {structure}
       JSON(1)        <_CHAR*12703>   '{"red":{"data":{"source":"ndf:/RED/DATA_ARRAY/DATA","sha...'
 
    RED            <NDF>           {structure}
       DATA_ARRAY     <ARRAY>         {structure}
-         DATA(8,5)      <_UBYTE>        86,172,68,196,13,110,180,176,133,126,47,187,116,228,
-                                        ... 89,172,226,205,215,201,135,239,106,160,129,88,115,175
+         DATA(8,5)      <_UBYTE>        86,172,68,196,13,110,180,176,133,...129,88,115,175
          ORIGIN(2)      <_INT64>        40,20
 
       WCS            <WCS>           {structure}
-         DATA(187)      <_CHAR*32>      ' Begin FrameSet',' Nframe = 3',' Base = 3',' Currnt = 2',
-                                        ... ' Sf...',' Sft2 = -19',' End ShiftMap',' End FrameSet'
-
-End of Trace.
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
 \end{verbatim}
     \end{small}
   \end{center}
@@ -575,5 +554,3 @@ We have developed a new approach that uses bespoke classes for different image t
 This has been coupled with an abstract file serialization system that lets us write the image data out in formats such as FITS and HDF5.
 To aid with cloud performance we are also proposing a new FITS convention whereby we store an index containing the byte offsets of each HDU.
 The intent is to switch to this new FITS format for Data Preview 2 which will be released in the second half of 2026.
-
-\clearpage
