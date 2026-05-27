@@ -514,7 +514,7 @@ In particular, we would like to consider whether out cutout service performance 
 One obvious downside of that would be that we are required to serve the FITS files and would therefore have to double the storage cost to also store some data products in Zarr format.
 
 The JSON pydantic model and the WCS are serialized as JSON using an LSST-specific naming convention since there is no existing standard for these data models.
-An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:zarr}.
+An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:zarr} and the xarray interpretation of the same data file can be found in listing~\ref{lst:xarray}.
 
 \begin{lstlisting}[caption=Overview of the Zarr layout for a \texttt{VisitImage}, label={lst:zarr}]
 /
@@ -532,6 +532,22 @@ An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:za
 |-- lsst_json (88349,) uint8
 |-- mask (4000, 4072) uint16
 `-- variance (4000, 4072) float32
+\end{lstlisting}
+
+\begin{lstlisting}[caption=Xarray interpretation of the same DP1 example Zarr file, label={lst:xarray}]
+<xarray.Dataset> Size: 163MB
+Dimensions:    (y: 4000, x: 4072, None: 88349)
+Dimensions without coordinates: y, x, None
+Data variables:
+    image      (y, x) float32 65MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+    lsst_json  (None) uint8 88kB dask.array<chunksize=(88349,), meta=np.ndarray>
+    mask       (y, x) uint16 33MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+    variance   (y, x) float32 65MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+Attributes:
+    data_model:  org.lsst.visit_image
+    version:     1
+    lsst:        {'version': 1, 'archive_class': 'VisitImage', 'json': 'lsst_...
+    ome:         {'version': '0.5', 'multiscales': [{'name': 'visitimage', 'a...
 \end{lstlisting}
 
 \section{Future Work}
