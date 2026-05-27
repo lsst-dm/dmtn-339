@@ -3,43 +3,47 @@
 The NSF-DOE Vera C.\ Rubin Observatory is designed to take data for the Legacy Survey of Space and Time over a period of 10 years.\cite{2019ApJ...873..111I}.
 We made our first data preview release (DP1) in 2025 using data from our commissioning camera\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from LSSTCam.\cite{10.71929/rubin/2571927,RTN-111}
 For all the Hyper Suprime-Cam Subaru (HSC) Strategic Program (SSP) data releases\cite{2022PASJ...74..247A} and for DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS files.
-The resultant FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque data that required specific Rubin science pipeline software\cite{PSTN-019} to interpret.
+The resulting FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque binary-table data that required Rubin-specific software\cite{PSTN-019} to interpret.
 In this paper we will describe the FITS layout we used for DP1 and describe its limitations.
 Then we will present our new approach to modeling our data structures and how we represent it in both FITS and HDF5 files.
 
 \section{The Rubin Visit Image Data Model}
 
-One of the most complex image dataset types we write are those associated with our visit images.
+One of the most complex image dataset types we write are those associated with our single-epoch visit images.
 At Rubin we define ``visit'' as an on-sky exposure.
 During construction we had planned to support an observing mode where two on-sky exposures would be taken sequentially without moving the telescope or instrument rotator and those would be called a visit.
 This changed during commissioning when we decided to drop the two-exposure mode and so now a visit is always a single on-sky exposure.
 For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
-Every visit includes a 32-bit mask as well as a variance array to go with the image data and FITS-style (keyword, value, and comment) metadata.
 
-The data model consists of the following additional components.
+In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the 189-CCD LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
+This in-memory representation is serialized to an external representation using the Rubin Butler system.\cite{2022SPIE12189E..11J}
+While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS, as noted above.
+Every visit includes the image pixel data array, along with corresponding 32-bit mask and variance arrays, together with FITS-style (keyword, value, and comment) metadata.
+
+The following additional components then go beyond the natural elements of the FITS file data model.
 
 \subsection{Bounded Fields}
 
 Some of the data model components rely on being able to represent a mathematical function to be evaluated over specific regions of the image.
-we call these \emph{bounded fields} and they are usually represented as Chebyshev polynomials but can also be specified as splines or lazy arithmetic combinations (e.g. sums or products) of multiple other bounded fields.
+We call these \emph{bounded fields} and they are usually represented as Chebyshev polynomials, but they can also be specified as splines or lazy arithmetic combinations (e.g., sums or products) of multiple other bounded fields.
 
 \subsection{Visit Information}
 
-A \texttt{VisitInfo} contains standardized information about the entire visit.
+A \texttt{VisitInfo} object contains standardized information about the entire visit.
 This includes the weather conditions, the instrument and observatory location, the time of the observation, the boresight tracking coordinates, and the exposure time.
-Confusingly, calibration observations do result in a \texttt{VisitInfo} being defined although some of the components are undefined in that case.
+Confusingly, calibration observations do result in a \texttt{VisitInfo} being defined although some of the components may be undefined in that case, e.g., for observations of the internal dome screen.
 We will not consider calibration datasets any further in this discussion since they generally are representable by a subset of the visit data model.
 
 \subsection{Filter Label}
 
 This is a small look up table defining the physical filter used for the observation and the waveband for that filter.
-In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} we attempted to store a more complex filter type that tried to record filter widths and centers, but we decided that this led to discrepancies between the measured filter profiles and the data files when profiles were recalculated.
-It is much simpler to store the physical filter name itself and then use that as a look up table into an external data set.
+In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} using the Rubin science pipelines we attempted to store a more complex filter type that recorded filter widths and centers, but we decided that this led to discrepancies between the measured filter profiles and the data files when the calibrations of filter profiles were subsequently improved.
+It is much simpler to store the physical filter name itself and then use that as a look-up key into an external data set.
 
 \subsection{Detector Information}
 
 LSSTCam has 189 science detectors along with additional wave front sensors and guider detectors.
-Each dataset contains a special detector object that describes the properties of this detector such as the serial number and manufactuer, the amplifier layout, and how the cordinates transform from focal plane position in millimeters to pixel coordinate.
+Each dataset contains a special detector object that describes the properties of this detector such as the serial number and manufacturer, the amplifier layout, and how the coordinates transform from focal plane position in millimeters to integer pixel coordinates.
 
 \subsection{Point-Spread Function}
 
@@ -56,10 +60,10 @@ Unlike \texttt{VisitInfo} the summary statistics can change depending on pipelin
 
 \subsection{World Coordinate Systems}
 
-At the large scale of the LSSTCam focal plane combined with atmospheric effects the standard FITS approaches to specifying a world coordinate system are not sufficiently accurate.
-We use the Starlink AST WCS library \cite{2016A&C....15...33B} as this gives us the flexibility to define our WCS in terms of individual steps that can be chained together in whatever order we deem appropriate.
+At the large scale of the LSSTCam focal plane combined with atmospheric effects the standard FITS approaches to specifying a world coordinate system, particularly its deviations from a nominal spherical projection, are not sufficiently rich or accurate.
+We use the Starlink AST WCS library \cite{2016A&C....15...33B} as this gives us the flexibility to define our WCS in terms of individual transformation steps that can be chained together in whatever order we deem appropriate.
 In that way we can include large scale polynomial distortions as well as more localized effects by using splines.
-The WCS is represented by an AST mapping that is abstracted from the user by a Rubin-specific interface.
+The WCS is represented by an AST mapping that is abstracted from the Python user by a Rubin-specific interface.
 
 \subsection{Validity Region}
 
@@ -74,7 +78,7 @@ Each photometry algorithm has its own aperture correction, which is used to tie 
 
 \subsection{Transmission Curve}
 
-This component represents the throughput as a function of wavelength, generally using units of Angstroms.
+This component represents the throughput as a function of wavelength, generally using units of angstroms.
 
 \subsection{Photometric Calibration}
 
@@ -86,8 +90,8 @@ The calibration can vary across the field and is represented by a bounded field.
 In the LSST Science Pipelines every image dataset is represented by the \texttt{lsst.afw.image.Exposure} class in both C++ and Python.
 An \texttt{Exposure} consists of a \texttt{MaskedImage} and an \texttt{ExposureInfo}.
 The \texttt{MaskedImage} contains two \texttt{Image} objects (including the variance) and a \texttt{Mask} object, and bounding boxes and metadata.
-One design decision that has caused confusion over the years is that you cannot associate world coordinates with a \texttt{MaskedImage} or \texttt{Image}, even though, conceptually, everyone expects such an entity to have a well-defined WCS.
-Instead the WCS is associated with the \texttt{ExposureInfo} where the additional components described above are defined.
+The image WCS is associated with the \texttt{ExposureInfo} where the additional components described above are defined.
+This design decision has caused confusion over the years, because the consequence is that you cannot associate world coordinates with a \texttt{MaskedImage} or \texttt{Image}, even though, conceptually, everyone expects such entities to have a well-defined WCS.
 
 \section{DP1 FITS Files}
 
@@ -122,7 +126,7 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
 \end{figure}
 
 
-A summary of the layout of a FITS file produced for DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
+A summary of the layout of a FITS file produced for a visit image in DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
 The pixel data use standard FITS data arrays with compression to represent the primary image data, the variance, and the mask.
 The mask image is a 2-d 32-bit integer array supporting 32 individual mask planes.
 A set of common mask planes is hard-coded into AFW itself to enforce standardization of the core planes, while others are defined by pipeline tasks that add them to the images they write out.
