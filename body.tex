@@ -128,12 +128,15 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
 
 A summary of the layout of a FITS file produced for a visit image in DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
 The pixel data use standard FITS data arrays with compression to represent the primary image data, the variance, and the mask.
-The mask image is a 2-d 32-bit integer array supporting 32 individual mask planes.
+The mask image is a 2D 32-bit integer array supporting 32 individual mask planes.
 A set of common mask planes is hard-coded into AFW itself to enforce standardization of the core planes, while others are defined by pipeline tasks that add them to the images they write out.
+This means that the assignment of the per-pixel mask Booleans to bit positions is contingent on the specific configuration of the processing pipeline.
+We provide headers that associate symbolic names with bit positions in order to mitigate the impact of this; users in downstream code are expected to refer to specific mask Booleans by their symbolic names, not their pixel positions.
 
-The FITS primary header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
-In general it is not possible to accurately represent the world coordinates of a visit image using the standard FITS-WCS approach.
-We therefore store an approximation of the WCS in the headers in SIP form\cite{2005ASPC..347..491S} so that tools like Astropy\cite{2013A&A...558A..33A} and Firefly\cite{2019ASPC..521...32W} can see some coordinates.
+The FITS primary HDU's header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
+We follow the common community convention of having no data payload in the primary HDU (NAXIS=0), leaving all the content to extension HDUs.
+As noted above, in general it is not possible to accurately represent the distortions in the world coordinates of a visit image using the standard FITS-WCS approaches.
+We therefore store an FITS-standard approximation of the WCS in the headers using the SIP ``registered convention''\cite{2005ASPC..347..491S} so that tools like Astropy\cite{2013A&A...558A..33A} and IPAC Firefly\cite{2019ASPC..521...32W} can display sky coordinates and perform catalog overlays on our images.
 For DP1 these approximations were good to a few milliarcseconds, i.e., around the astrometric precision of the true WCS, but this may not always be true in the future.
 
 The \texttt{VisitInfo} struct also serializes into the FITS primary header.
@@ -215,7 +218,7 @@ AFW only sees it through the persistable interface.
 The actual FITS representation depends on the concrete PSF class and its registered factory.
 For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
 The PIFF serialization uses the Python storable interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
-At the time there was no standardized PIFF serialization we could persist other than Pickle (a situation which has now been fixed).
+At the time of creation of DP1 there was no standardized PIFF serialization we could persist other than Pickle (a situation which has now been fixed).
 This decision was the pragmatic one at the time but it means that a user reading our files without using our code \emph{must} use Python to reconstruct the PIFF object and does not have the option of implementing their own equivalent in another language.
 The use of Pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
 
