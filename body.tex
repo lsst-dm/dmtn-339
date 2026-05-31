@@ -292,27 +292,7 @@ The system has been designed to allow flexibility in image classes but with a st
 
 \subsection{Serialization System}
 
-A conscious design decision was to abstract the file output from the serialization infrastructure.
-
-Every saveable Python type in the package (such as \texttt{Image}, \texttt{MaskedImage}, \texttt{VisitImage}, the various PSFs, transforms) has a paired serialization model — a Pydantic \texttt{ArchiveTree} subclass that mirrors the type's on-disk shape (e.g., \texttt{VisitImageSerializationModel} or \texttt{ColorImageSerializationModel}).
-The Python serialization model class is what is then persisted.
-The two are linked by a single class method defined on the Python class that returns the archive tree.
-The argument to this method is a small Pydantic model that names ``out-of-band data'' (large arrays, tables, frame sets) for a particular backend, with one existing for each backend (JSON, FITS, and NDF), referring to locations in the JSON model or an HDU number in a FITS file, or the hierarchical path of an HDF5 file.
-
-When a Python type is written, an \texttt{OutputArchive} for the backend is created and passed to that object's serialization method.
-A new archive tree Pydantic model is created where scalar fields are stored directly but large numerical arrays and tables are extracted and then referenced from the model.
-If an entity appears more than once in the model (such as a PSF) it is stored once and then referenced.
-Once the model is transformed to JSON the binary side channel information is then stored in a backend-specific way.
-
-On read the JSON is located using the backend-specific code and validated.
-The model is then handed off to a deserialization method which resolves all the references to other parts of the file and reads those to reconstruct the Python type.
-
-This design is what makes the three backends interchangeable.
-A Python class doesn't know whether it lives in a FITS HDU list or an HDS structure; it only knows how to translate itself to and from a Pydantic tree that contains references.
-Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (which knows where to put bytes) and its own referencing type (which knows how to spell a pointer to those bytes).
-Adding a fourth backend means writing those three pieces; no Python class needs to change.
-Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
-
+\begin{figure}[!t]
 \begin{lstlisting}[caption=PIFF solution in Pydantic model referencing a data component., language=json, label={lst:piff-ndf}]
 "interp": {
   "tables": {
@@ -338,6 +318,28 @@ Validation, schema export, and version stamping all live on the shared \texttt{A
   }
 }
 \end{lstlisting}
+\end{figure}
+
+A conscious design decision was to abstract the file output from the serialization infrastructure.
+
+Every saveable Python type in the package (such as \texttt{Image}, \texttt{MaskedImage}, \texttt{VisitImage}, the various PSFs, transforms) has a paired serialization model — a Pydantic \texttt{ArchiveTree} subclass that mirrors the type's on-disk shape (e.g., \texttt{VisitImageSerializationModel} or \texttt{ColorImageSerializationModel}).
+The Python serialization model class is what is then persisted.
+The two are linked by a single class method defined on the Python class that returns the archive tree.
+The argument to this method is a small Pydantic model that names ``out-of-band data'' (large arrays, tables, frame sets) for a particular backend, with one existing for each backend (JSON, FITS, and NDF), referring to locations in the JSON model or an HDU number in a FITS file, or the hierarchical path of an HDF5 file.
+
+When a Python type is written, an \texttt{OutputArchive} for the backend is created and passed to that object's serialization method.
+A new archive tree Pydantic model is created where scalar fields are stored directly but large numerical arrays and tables are extracted and then referenced from the model.
+If an entity appears more than once in the model (such as a PSF) it is stored once and then referenced.
+Once the model is transformed to JSON the binary side channel information is then stored in a backend-specific way.
+
+On read the JSON is located using the backend-specific code and validated.
+The model is then handed off to a deserialization method which resolves all the references to other parts of the file and reads those to reconstruct the Python type.
+
+This design is what makes the three backends interchangeable.
+A Python class doesn't know whether it lives in a FITS HDU list or an HDS structure; it only knows how to translate itself to and from a Pydantic tree that contains references.
+Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (which knows where to put bytes) and its own referencing type (which knows how to spell a pointer to those bytes).
+Adding a fourth backend means writing those three pieces; no Python class needs to change.
+Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
 
 Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array, which in this example is a path in the HDF5 hierarchy.
 This is tabular data and the serializer has the option of representing this as a table natively in the output file or instead representing it as separate columns that can be reconstructed on read into a table if the file format does not have native table support.
