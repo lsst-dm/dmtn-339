@@ -16,6 +16,7 @@ This changed during commissioning when we decided to drop the two-exposure mode 
 For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
 
 In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the 189-CCD LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
+The main package implementing the legacy serialization code is called AFW\footnote{Sometimes thought of as standing for ``application framework'' and other times ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
 This in-memory representation is serialized to an external representation using the Rubin Butler system.\cite{2022SPIE12189E..11J}
 While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS, as noted above.
 Every visit includes the image pixel data array, along with corresponding 32-bit mask and variance arrays, together with FITS-style (keyword, value, and comment) metadata.
@@ -166,21 +167,21 @@ The components themselves are serialized in different ways.
 
 \begin{description}
 
-  \item[\textbf{FilterLabel}]
+\item[\textbf{FilterLabel}]
 
-  This is a very simple table with two rows.
-  One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
-  These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
+This is a very simple table with two rows.
+One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
+These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
 
-  \item[\textbf{Detector}]
+\item[\textbf{Detector}]
 
-  This is written as two catalogs.
-  The first summarizes detector properties and the second describes amplifier properties with one row per amplifier.
+This is written as two catalogs.
+The first summarizes detector properties and the second describes amplifier properties with one row per amplifier.
 
-  \item[\textbf{TransformMap}]
+\item[\textbf{TransformMap}]
 
-  This contains 2-D mappings define detector transformations from different frames.
-  The mappings are byte string native serializations of the AST library mappings.
+This contains 2-D mappings define detector transformations from different frames.
+The mappings are byte string native serializations of the AST library mappings.
 
 \item[\textbf{Polygon}]
 
