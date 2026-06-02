@@ -1,6 +1,585 @@
 \section{Introduction}
 
-\textbf{Put your paper here.}
-\vskip 0.4in
+The NSF-DOE Vera C.\ Rubin Observatory is designed to take data for the Legacy Survey of Space and Time over a period of 10 years.\cite{2019ApJ...873..111I}.
+We made our first data preview release (DP1) in 2025 using data from our commissioning camera\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from LSSTCam.\cite{10.71929/rubin/2571927,RTN-111}
+For all the Hyper Suprime-Cam Subaru (HSC) Strategic Program (SSP) data releases\cite{2022PASJ...74..247A} and for DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS files.
+The resulting FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque binary-table data that required Rubin-specific software\cite{PSTN-019} to interpret.
+In this paper we will describe the FITS layout we used for DP1 and describe its limitations.
+Then we will present our new approach to modeling our data structures and how we represent it in both FITS and HDF5 files.
 
-This is the Rubin Observatory overview paper: \cite{2019ApJ...873..111I}.
+\section{The Rubin Visit Image Data Model}
+
+One of the most complex image dataset types we write are those associated with our single-epoch visit images.
+At Rubin we define ``visit'' as an on-sky exposure.
+During construction we had planned to support an observing mode where two on-sky exposures would be taken sequentially without moving the telescope or instrument rotator and those would be called a visit.
+This changed during commissioning when we decided to drop the two-exposure mode and so now a visit is always a single on-sky exposure.
+For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
+
+In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the 189-CCD LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
+The main package implementing the legacy serialization code is called AFW\footnote{Sometimes thought of as standing for ``application framework'' and other times ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
+This in-memory representation is serialized to an external representation using the Rubin Butler system.\cite{2022SPIE12189E..11J}
+While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS, as noted above.
+Every visit includes the image pixel data array, along with corresponding 32-bit mask and variance arrays, together with FITS-style (keyword, value, and comment) metadata.
+
+The following additional components then go beyond the natural elements of the FITS file data model.
+
+\subsection{Bounded Fields}
+
+Some of the data model components rely on being able to represent a mathematical function to be evaluated over specific regions of the image.
+We call these \emph{bounded fields} and they are usually represented as Chebyshev polynomials, but they can also be specified as splines or lazy arithmetic combinations (e.g., sums or products) of multiple other bounded fields.
+
+\subsection{Visit Information}
+
+A \texttt{VisitInfo} object contains standardized information about the entire visit.
+This includes the weather conditions, the instrument and observatory location, the time of the observation, the boresight tracking coordinates, and the exposure time.
+Confusingly, calibration observations do result in a \texttt{VisitInfo} being defined although some of the components may be undefined in that case, e.g., for observations of the internal dome screen.
+We will not consider calibration datasets any further in this discussion since they generally are representable by a subset of the visit data model.
+
+\subsection{Filter Label}
+
+This is a small look up table defining the physical filter used for the observation and the waveband for that filter.
+In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} using the Rubin science pipelines we attempted to store a more complex filter type that recorded filter widths and centers, but we decided that this led to discrepancies between the measured filter profiles and the data files when the calibrations of filter profiles were subsequently improved.
+It is much simpler to store the physical filter name itself and then use that as a look-up key into an external data set.
+
+\subsection{Detector Information}
+
+LSSTCam has 189 science detectors along with additional wave front sensors and guider detectors.
+Each dataset contains a special detector object that describes the properties of this detector such as the serial number and manufacturer, the amplifier layout, and how the coordinates transform from focal plane position in millimeters to integer pixel coordinates.
+
+\subsection{Point-Spread Function}
+
+There are many ways to represent a point-spread function (PSF) and we use a plugin system to allow different variants to be stored.
+We use both a heavily modified version of \texttt{PSFEx} \cite{2011ASPC..442..435B,2013ascl.soft01001B} and \texttt{Piff} \cite{2021ascl.soft02024J,2021MNRAS.501.1282J} in our production pipelines.
+The PSF can vary across the image and the PSF model has to be able to account for that.
+
+\subsection{Exposure Summary Statistics}
+
+During the analysis of a visit the pipeline calculates derived scalar quantities which we store in a small class.
+These include summaries of global PSF properties, source counts, and effective exposure times and bounding boxes.
+This information can be used by downstream pipeline components to decide whether a visit should be included in a co-add or not.
+Unlike \texttt{VisitInfo} the summary statistics can change depending on pipeline configuration.
+
+\subsection{World Coordinate Systems}
+
+At the large scale of the LSSTCam focal plane combined with atmospheric effects the standard FITS approaches to specifying a world coordinate system, particularly its deviations from a nominal spherical projection, are not sufficiently rich or accurate.
+We use the Starlink AST WCS library \cite{2016A&C....15...33B} as this gives us the flexibility to define our WCS in terms of individual transformation steps that can be chained together in whatever order we deem appropriate.
+In that way we can include large scale polynomial distortions as well as more localized effects by using splines.
+The WCS is represented by an AST mapping that is abstracted from the Python user by a Rubin-specific interface.
+
+\subsection{Validity Region}
+
+This is a polygon in pixel coordinates defining the valid region of the image.
+For most detectors, the valid polygon is just the detector's bounding box, but those on the edge of the focal plane have a valid polygon boundary that marks where vignetting occurs.
+
+\subsection{Aperture Corrections}
+
+Multiple aperture corrections can be stored, each one being labeled and associated with a bounded field.
+Different measurement algorithms can result in different aperture corrections and the user can select the appropriate one.
+Each photometry algorithm has its own aperture correction, which is used to tie that algorithm to a common photometric system.
+
+\subsection{Transmission Curve}
+
+This component represents the throughput as a function of wavelength, generally using units of angstroms.
+
+\subsection{Photometric Calibration}
+
+Part of the visit processing determines how the image should be corrected to convert detector units to nJy.
+The calibration can vary across the field and is represented by a bounded field.
+
+\subsection{Class Hierarchy}
+
+In the LSST Science Pipelines every image dataset is represented by the \texttt{lsst.afw.image.Exposure} class in both C++ and Python.
+An \texttt{Exposure} consists of a \texttt{MaskedImage} and an \texttt{ExposureInfo}.
+The \texttt{MaskedImage} contains two \texttt{Image} objects (including the variance) and a \texttt{Mask} object, and bounding boxes and metadata.
+The image WCS is associated with the \texttt{ExposureInfo} where the additional components described above are defined.
+This design decision has caused confusion over the years, because the consequence is that you cannot associate world coordinates with a \texttt{MaskedImage} or \texttt{Image}, even though, conceptually, everyone expects such entities to have a well-defined WCS.
+
+\section{DP1 FITS Files}
+
+\begin{figure}[!t]
+\begin{center}
+\begin{small}
+\begin{verbatim}
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU     707   ()
+  1  IMAGE         1 CompImageHDU     71   (4072, 4000)   float32
+  2  MASK          1 CompImageHDU     93   (4072, 4000)   int32
+  3  VARIANCE      1 CompImageHDU     71   (4072, 4000)   float32
+  4  ARCHIVE_INDEX    1 BinTableHDU     41   93R x 7C   [1J, 1J, 1J, 1J, 1J, 64A, 64A]
+  5  FilterLabel    1 BinTableHDU     28   1R x 3C   [2X, 32A, 32A]
+  6  Detector      1 BinTableHDU    115   1R x 22C   [1QA(7), 1J, 1J, 1QA(13), 1J, 1J, ... 1QA(3), 1J]
+  7  TransformMap    1 BinTableHDU     33   19R x 5C   [1QA(10), 1QA(7), 1QA(10), 1QA(7), 1J]
+  8  ExposureSummaryStats    1 BinTableHDU     19   21R x 1C   [1QB(102617)]
+  9  Detector      2 BinTableHDU    201   16R x 38C   [3X, 1QA(3), 1J, 1J, 1J, 1J, 1D, ..., 1QA(2)]
+ 10  SkyWcs        1 BinTableHDU     21   1R x 2C   [1QB(10399), 1QB(10437)]
+ 11  ApCorrMap     1 BinTableHDU     21   64R x 2C   [64A, 1J]
+ 12  ChebyshevBoundedField    1 BinTableHDU     41   34R x 6C   [1J, 1J, 1J, 1J, 1J, 1D]
+ 13  ChebyshevBoundedField    2 BinTableHDU     42   31R x 6C   [1J, 1J, 1J, 1J, 1J, 9D]
+ 14  PhotoCalib    1 BinTableHDU     36   1R x 5C   [1X, 1D, 1D, 1J, 1J]
+ 15  Polygon       1 BinTableHDU     21   5R x 2C   [1D, 1D]
+ 16  PsfexPsf      1 BinTableHDU     52   1R x 9C   [1J, 1J, 1J, 1J, 1J, 1J, 1D, 1D, 1E]
+ 17  PsfexPsf      2 BinTableHDU     46   1R x 8C   [2J, 1J, 6D, 6D, 3J, 41334E, 2D, 2D]
+\end{verbatim}
+\end{small}
+\end{center}
+\label{fig:old-layout}
+\caption{The structure of a representative DP1 FITS file using the legacy schema.}
+\end{figure}
+
+
+A summary of the layout of a FITS file produced for a visit image in DP1 is shown in Fig.~\ref{fig:old-layout} and shows the extensive use of FITS binary tables.
+The pixel data use standard FITS data arrays with compression to represent the primary image data, the variance, and the mask.
+The mask image is a 2D 32-bit integer array supporting 32 individual mask planes.
+A set of common mask planes is hard-coded into AFW itself to enforce standardization of the core planes, while others are defined by pipeline tasks that add them to the images they write out.
+This means that the assignment of the per-pixel mask Booleans to bit positions is contingent on the specific configuration of the processing pipeline.
+We provide headers that associate symbolic names with bit positions in order to mitigate the impact of this; users in downstream code are expected to refer to specific mask Booleans by their symbolic names, not their pixel positions.
+
+The FITS primary HDU's header contains the standard header values from the raw data file\cite{CTN-004} but a visit image file also adds headers itself on serialization.
+We follow the common community convention of having no data payload in the primary HDU (NAXIS=0), leaving all the content to extension HDUs.
+As noted above, in general it is not possible to accurately represent the distortions in the world coordinates of a visit image using the standard FITS-WCS approaches.
+We therefore store an FITS-standard approximation of the WCS in the headers using the SIP ``registered convention''\cite{2005ASPC..347..491S} so that tools like Astropy\cite{2013A&A...558A..33A} and IPAC Firefly\cite{2019ASPC..521...32W} can display sky coordinates and perform catalog overlays on our images.
+For DP1 these approximations were good to a few milliarcseconds, i.e., around the astrometric precision of the true WCS, but this may not always be true in the future.
+
+The \texttt{VisitInfo} struct also serializes into the FITS primary header.
+We now consider this to be an anti-pattern because the keywords are not namespaced.
+This can lead to confusion where a header from an instrument using \texttt{PRESSURE} to represent the air pressure in one unit will get a new value in a potentially different unit.
+Even more dangerously, we write the midpoint of the observation using the standard \texttt{DATE-AVG} header and we force \texttt{TIMESYS} to TAI without attempting to adjust any other standard \texttt{DATE-} headers that might be in the file from the instrument raw headers using UTC.
+This can lead to errors from any tooling that is trying to interpret headers using the standard.
+If we were approaching this today we would store the \texttt{VisitInfo} in the header using an approach like \texttt{HIERARCH LSST VISITINFO DATE-AVG} and make it absolutely clear which headers were coming from the serialization and which were originally from the raw data.
+We also write the detector name and detector serial ID into headers \texttt{DETNAME} and \texttt{DETSER}.
+
+The remaining content is stored in FITS binary tables.
+
+\subsection{Table Archive System}
+
+The fundamental serialization approach for the DP1 data involves a generic persistence infrastructure that converts exposure components into rows of tables that can be stored in FITS.
+
+Each component registers itself as a storable that implements the creation of a tabular version of the object that can be stored.
+During serialization each component is allocated an integer archive ID that is referenced by a table of contents stored in the \texttt{ARCHIVE\_INDEX} extension.
+The ID itself is stored in the primary FITS header with key \texttt{ARCHIVE\_INDEX\_<COMPONENT>}.
+
+Each component is then represented in the \texttt{ARCHIVE\_INDEX} table indexed by the ID which refers to a later HDU and rows within that HDU.
+If components share the same table schema they are written to the same HDU, which leads to a storage efficiency but does mean that each HDU can not be interpreted without the primary index.
+
+\subsubsection{Component Serializations}
+
+The components themselves are serialized in different ways.
+
+\begin{description}
+
+\item[\textbf{FilterLabel}]
+
+This is a very simple table with two rows.
+One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
+These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
+
+\item[\textbf{Detector}]
+
+This is written as two catalogs.
+The first summarizes detector properties and the second describes amplifier properties with one row per amplifier.
+
+\item[\textbf{TransformMap}]
+
+This contains 2-D mappings define detector transformations from different frames.
+The mappings are byte string native serializations of the AST library mappings.
+
+\item[\textbf{Polygon}]
+
+Polygons are represented as a two column table containing the \texttt{x} and \texttt{y} vertices.
+
+\item[\textbf{SkyWcs}]
+
+This represents the pixel to sky transformations represented as a byte string native serialization of the AST library.
+Optionally we can also store the FITS WCS approximation of the full mapping.
+
+\item[\textbf{PhotoCalib}]
+
+This table contains the scalar calibration information and references to archive IDs of bounded fields.
+
+\item[\textbf{ApCorrMap}]
+
+This is a simple table that associates the name of the correction with a reference to the bounded field.
+
+\item[\textbf{ChebyshevBoundedField}]
+
+These define the bounded fields referenced from other HDUs.
+Each row defines the Chebyshev order, the bounding box for which the polynomial is valid and the polynomial coefficients.
+In the example output there are two HDUs labeled as Chebyshevs because there are different coefficient counts in use.
+
+\item[\textbf{ExposureSummaryStats}]
+
+This is a Python data class.
+All Python packages must serialize as strings which are stored in a single bytes column.
+For this class the serialization uses YAML, but since this schema is also used by other components the HDU will likely contain serializations from other classes and the HDU name is going to depend on the order of serialization.
+
+\item[\textbf{PSFs}]
+
+The PSF component is polymorphic.
+AFW only sees it through the persistable interface.
+The actual FITS representation depends on the concrete PSF class and its registered factory.
+For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
+The PIFF serialization uses the Python storable interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
+At the time of creation of DP1 there was no standardized PIFF serialization we could persist other than Pickle (a situation which has now been fixed).
+This decision was the pragmatic one at the time but it means that a user reading our files without using our code \emph{must} use Python to reconstruct the PIFF object and does not have the option of implementing their own equivalent in another language.
+The use of Pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
+
+\end{description}
+
+\section{Limitations of the DP1 Serialization}
+
+We have been battling the limitations of this serialization framework for some time.\cite{DMTN-120,DMTN-251}
+A key limitation for implementers was the difficulty in adding new components to the archive system.
+The core of the system requires C++ and it was only relatively recently that we were able to include Python classes into the serialization mechanism.
+Even then, each class is required to inherit from the \texttt{Storable} infrastructure in order to hook into the serialization system.
+This adds an unnecessary burden on each class.
+Furthermore, since we expect every image dataset we write to be using the AFW \texttt{Exposure} classes this means that whenever we need to add support for a new component, every dataset type sees that component even if it is not useful for that variant.
+
+Whilst the implementation complexity is only of concern to developers and is a one-off cost, a more fundamental issue relates to the long-term usability of these files.
+As can be seen from Fig.~\ref{fig:old-layout} the extension names do not necessarily tell you what the extension is associated with; for example, bounded fields are serialized as extensions but you do not know which component the bounded field is associated with.
+As described previously, multiple components can also be written to the same HDU, with the \texttt{EXTNAME} referring to only one of the components out of convenience.
+In order to understand what each extension is part of you must first read the index extension.
+
+The complex logic effectively requires an end-user uses the \texttt{lsst.afw} Python classes to read the extensions.
+Re-implementing the logic in Astropy or a language other than Python or C++ is potentially possible for a highly motivated individual (and with modern large-language model coding tools using the AFW code as a reference someone might be tempted to try it), but it would be preferable to avoid this situation (and the associated need to create corresponding non-AFW classes for all the components) if at all possible.
+Additionally, we are formally required to fully document how to read the files we ship to the community, and so are motivated to ship a file format that can be described relatively straightforwardly.
+Using Pickles for the current format makes documentation effectively impossible.
+
+The requirement to read the archive index does have other ramifications.
+The system was designed in an era when there was an assumption that the file would always be available on a POSIX file system.
+For DP1 we store the data in Google Cloud Storage and DP2 will be stored at SLAC but accessed remotely from Google\cite{2024SPIE13101E..2BO} over https.
+When a user requests a component, such as the valid polygon, we would ideally like to retrieve only the HDU containing that information.
+The simplest option would be to download the entire file to local storage and then read the component.
+To avoid downloading megabytes of pixel data, instead what we have to do is construct fake single-pixel image HDUs for the image/variance/mask arrays and then download all the extension HDUs so we can write a file locally and use the AFW code to read the index and then construct the extension.
+This is not efficient but is an inevitable outcome of the approach.
+
+\section{Changing Approach for DP2}
+
+Given the discussion above, we decided that for DP2 we would change the way we represent image datasets in Python and also change how we serialize them.
+Our main requirements were:
+
+\begin{itemize}
+
+  \item The main implementation language should be Python rather than C++.
+  \item Each image dataset type (such as visit images, difference images, co-adds) should be represented by its own Python class.
+  This allows each dataset type to define only the components that are directly relevant to that type.
+  It also allows more type safety in the pipelines rather than always assuming a generic image container.
+  \item Informed by the experience with the Advanced Scientific Data Format (ASDF)\cite{2015A&C....12..240G}, the data models written to the file must be associated with public formal schemas.
+  \item It should be possible to locate and read a component efficiently.
+  \item People should be able to install software to read the files with our data models with only a \texttt{pip install} and the FITS files must be usable from Astropy and general viewing tools.
+\end{itemize}
+
+One additional input into the process was to make a conscious effort to distinguish the data model from the serialization format.
+Separating the model from the file format has been a long-running debate in the community\cite{2019ASPC..521..733C,2026arXiv260520714S} as we discuss the limitations of the FITS format\cite{2015A&C....12..133T} and the possibilities for being more flexible in terms of archival artifacts being produced.
+
+\subsection{The New Data Model}
+
+The most fundamental part of the data model is the \texttt{Image} class.
+This contains a two-dimensional Numpy data array with a pixel origin and units, a projection that can map pixels to world coordinates, as well as some simple keyword/value metadata support.
+
+There is also a \texttt{Mask} class which is similar to \texttt{Image} except it has an additional schema that describes the mask planes (bit numbers, mask name, mask description) and internally is represented as a three-dimensional array even though the external interface is a two-dimensional array.
+The third dimension uses unsigned bytes to allow arbitrary numbers of mask planes to be stored efficiently in groups of eight without being constrained to jump from 32 mask planes directly to 64.
+
+Additional components are represented by using Python Pydantic models\cite{2025zndo..15662245C} which provide validation and can define formal schemas.
+Every part of the model uses Pydantic and we intend to generate JSON Schema to allow formal validation by third parties.
+We have decided that where a model has an equivalent definition in the ASDF schema we will use a model that is compatible.
+We do not directly use the ASDF schema definitions but we do define ASDF-compatible variants for dealing with Astropy quantities, units, N-dimensional arrays, time, and table columns.
+
+We have reimplemented the AFW component classes in Python, including bounded fields, aperture correction maps, and PSFs and these are used for the new \texttt{VisitImage} class.
+Additionally, we use a more general observation metadata model instead of \texttt{VisitInfo}.
+
+In the initial set there is also a \texttt{ColorImage} class that consists of three images (red, green, and blue) and a \texttt{CellCoadd} that represents a modern implementation of our cell co-add types.\cite{DMTN-294,SITCOMTN-137}
+The system has been designed to allow flexibility in image classes but with a standardized serialization system.
+
+\subsection{Serialization System}
+
+\begin{figure}[!t]
+\begin{lstlisting}[caption=PIFF solution in Pydantic model referencing a data component., language=json, label={lst:piff-ndf}]
+"interp": {
+  "tables": {
+    "solution": {
+      "metadata": {},
+      "table": {
+        "columns": [
+          {
+            "data": {
+              "source": "ndf:/MORE/LSST/PSF/PIFF/INTERP/SOLUTION/DATA_ARRAY/DATA",
+              "shape": [
+                625,
+                15
+              ],
+              "datatype": "float64",
+              "byteorder": "big"
+            },
+            "name": "q"
+          }
+        ]
+      }
+    }
+  }
+}
+\end{lstlisting}
+\end{figure}
+
+A conscious design decision was to abstract the file output from the serialization infrastructure.
+
+Every saveable Python type in the package (such as \texttt{Image}, \texttt{MaskedImage}, \texttt{VisitImage}, the various PSFs, transforms) has a paired serialization model — a Pydantic \texttt{ArchiveTree} subclass that mirrors the type's on-disk shape (e.g., \texttt{VisitImageSerializationModel} or \texttt{ColorImageSerializationModel}).
+The Python serialization model class is what is then persisted.
+The two are linked by a single class method defined on the Python class that returns the archive tree.
+The argument to this method is a small Pydantic model that names ``out-of-band data'' (large arrays, tables, frame sets) for a particular backend, with one existing for each backend (JSON, FITS, and NDF), referring to locations in the JSON model or an HDU number in a FITS file, or the hierarchical path of an HDF5 file.
+
+When a Python type is written, an \texttt{OutputArchive} for the backend is created and passed to that object's serialization method.
+A new archive tree Pydantic model is created where scalar fields are stored directly but large numerical arrays and tables are extracted and then referenced from the model.
+If an entity appears more than once in the model (such as a PSF) it is stored once and then referenced.
+Once the model is transformed to JSON the binary side channel information is then stored in a backend-specific way.
+
+On read the JSON is located using the backend-specific code and validated.
+The model is then handed off to a deserialization method which resolves all the references to other parts of the file and reads those to reconstruct the Python type.
+
+This design is what makes the three backends interchangeable.
+A Python class doesn't know whether it lives in a FITS HDU list or an HDS structure; it only knows how to translate itself to and from a Pydantic tree that contains references.
+Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (which knows where to put bytes) and its own referencing type (which knows how to spell a pointer to those bytes).
+Adding a fourth backend means writing those three pieces; no Python class needs to change.
+Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
+
+Listing~\ref{lst:piff-ndf} shows the JSON serialization of part of the PIFF model and how it refers to the location of the corresponding data array, which in this example is a path in the HDF5 hierarchy.
+This is tabular data and the serializer has the option of representing this as a table natively in the output file or instead representing it as separate columns that can be reconstructed on read into a table if the file format does not have native table support.
+
+\subsubsection{JSON Serialization}
+
+Pydantic models serialize to JSON as a native form and we have included support for a JSON serialization that also includes the numeric arrays.
+The main reason for doing this is to allow components (that might have a few thousand data values in an ancillary array) to be serialized with the Butler in a simpler text-based form, but the system is also able to serialize the full image types.
+For example, serializing a DP1 \texttt{VisitImage} to JSON results in a 600MB JSON file that can be compressed using Zstd to 200MB.
+We would not use full image JSON serialization in production but it does demonstrate the abstraction layer works.
+
+\subsubsection{FITS Serialization}
+
+\begin{figure}[!t]
+  \begin{center}
+    \begin{small}
+      \begin{verbatim}
+Filename: dp1.fits
+No.    Name      Ver    Type      Cards   Dimensions   Format
+  0  PRIMARY       1 PrimaryHDU     689   ()
+  1  IMAGE         1 CompImageHDU     74   (4072, 4000)   float32
+  2  MASK          1 CompImageHDU    109   (4072, 4000)   int32
+  3  VARIANCE      1 CompImageHDU     74   (4072, 4000)   float32
+  4  PSF/PIFF/INTERP/SOLUTION    1 BinTableHDU     12   1R x 1C   [9375D]
+  5  JSON          1 BinTableHDU     11   1R x 1C   [PB(65720)]
+  6  INDEX         1 BinTableHDU     23   6R x 7C   [24A, J, 8A, L, K, K, K]
+      \end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{A DP1 visit image converted to the new FITS serialization.}
+  \label{fig:new-fits}
+\end{figure}
+
+For FITS output we continue to write the image, mask, and variance to individual HDUs but the primary FITS header contains some additional keys to aid the deserialization tools.
+These headers are:
+
+\begin{description}
+  \item[\textbf{INDXADDR}]
+  The byte offset to the start of the HDU containing the HDU index.
+  \item[\textbf{INDXSIZE}]
+  The size of the index HDU in bytes.
+  \item[\textbf{JSONADDR}]
+  The byte offset to the start of the HDU containing the JSON data model.
+  \item[\textbf{JSONSIZE}]
+  The size of the JSON HDU.
+\end{description}
+
+At our scale, especially with the hybrid data center model we have had to adopt,\cite{2024SPIE13101E..2BO} it is critical for performance to reduce the number of server round trips when performing a cutout\cite{DMTN-208} and the index allows us to efficiently skip to exactly the HDUs that we need to read without having to scan the entire file.
+We are intending to submit the index HDU as a registered FITS convention once we can obtain some performance numbers.
+
+As discussed above for DP1 data, although our WCS fits are not always representable as standard FITS-WCS headers, we always try to write a FITS WCS to the headers of each image HDU.
+For co-adds this will be an accurate model but it will be an approximation for visit images and for LSSTCam visits the accuracy will be slightly worse at the edges of the focal plane than it was for LSSTComCam DP1 data.
+
+The \texttt{JSON} HDU contains the primary data model as JSON serialized from a Pydantic model.
+When the model contains large arrays of numbers those are pulled out of the JSON serialization and stored in FITS binary table or image HDUs.
+A reference to the FITS HDU is included in the JSON serialization so that on read the data can be located.
+
+\subsubsection{HDF5 Serialization}
+
+\begin{figure}[!tbp]
+  \begin{center}
+    \begin{small}
+\begin{verbatim}
+   DATA_ARRAY     <ARRAY>         {structure}
+      DATA(4072,4000)  <_REAL>       -6.884751,-6.867677,-6.850569, ... -5.527539,-5.532708
+      ORIGIN(2)      <_INT64>        0,0
+
+   MORE           <EXT>           {structure}
+      FITS(693)      <_CHAR*80>      'COMMENT   FITS (Flexible Image Transport System) format...'
+                                     ... 'HIERARCH HAS-SIMULA...','EXPID   =          45508261376'
+      LSST           <LSST>          {structure}
+         JSON(1)        <_CHAR*88307>   '{"image":{"data":{"value":{"source":"ndf:/DATA_ARRAY/...'
+         MASK           <NDF>           {structure}
+            DATA_ARRAY     <ARRAY>         {structure}
+               BAD_PIXEL      <_LOGICAL>      FALSE
+               DATA(4072,4000,2)  <_UBYTE>    49,49,49,49,49,49,49,49, ... 0,0,0,0,0
+               ORIGIN(3)      <_INT64>        0,0,0
+
+            WCS            <WCS>           {structure}
+               DATA(337)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
+
+         PSF            <PSF>           {structure}
+            PIFF           <PIFF>          {structure}
+               INTERP         <INTERP>        {structure}
+                  SOLUTION       <NDF>           {structure}
+                     DATA_ARRAY     <ARRAY>         {structure}
+                        DATA(15,625,1)  <_DOUBLE>      -8.80450720119882D-5, ... 4.17704930562368D-14
+                        ORIGIN(3)      <_INT64>        0,0,0
+
+   QUALITY        <QUALITY>       {structure}
+      BADBITS        <_UBYTE>        *
+      QUALITY        <ARRAY>         {structure}
+         BAD_PIXEL      <_LOGICAL>      FALSE
+         DATA(4072,4000)  <_UBYTE>      1,1,1,1,1,1,1,1,1,1,1,1, ... 1,1,1,1,1,1,1
+         ORIGIN(2)      <_INTEGER>      0,0
+
+   UNITS          <_CHAR*3>       'nJy'
+   VARIANCE       <ARRAY>         {structure}
+      DATA(4072,4000)  <_REAL>       272.9544,272.951,272.9477, ... 259.7228,259.7221
+      ORIGIN(2)      <_INT64>        0,0
+
+   WCS            <WCS>           {structure}
+      DATA(312)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
+\end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{The structure of the HDF5 representation of a DP1 visit FITS file converted to use the NDF data model. This is the output from the Starlink \texttt{hdstrace} command, which uses HDF5 group attributes to match the Starlink HDS semantics.}
+  \label{fig:dp1-ndf}
+\end{figure}
+
+To demonstrate that the serialization interface was flexible and not FITS-specific, we decided to also write an HDF5 plugin.
+We chose to use the Starlink N-Dimensional Data Format (NDF) data model\cite{2015A&C....12..146J} layered on the Starlink Hierarchical Data System (HDS) abstraction over HDF5.\cite{2015A&C....12..221J}
+
+Our \texttt{MaskedImage} maps almost directly onto NDF: the image and variance arrays support pixel origin and units, and the WCS is represented by an AST native serialization.
+The model also has a convention for including direct support for FITS header cards, stored as an extension in a character array.
+There is one slight model mismatch concerning mask planes.
+NDF has a ``quality'' array corresponding to the mask but is limited to only 8 mask planes, whereas we can support an arbitrary number.
+
+For the more complex data models NDF provides sufficient flexibility to be able to represent them, although there is no native support for tabular data.
+When there is additional information associated with a single image the convention is to place that in the extension ``airlock'' indicated by \texttt{.MORE}.
+This section can contain arbitrary additional structure and is where we write the JSON model.
+If there are multiple top-level images or masked images in the Python representation we would instead write those at the top level and the JSON component would also be at the top level since it is shared between all the images.
+
+\paragraph{VisitImage}
+
+Fig.~\ref{fig:dp1-ndf} shows the NDF equivalent of the FITS file listed in Fig.~\ref{fig:new-fits}.
+There is inherently more structure in the NDF representation.
+Here a \texttt{QUALITY} component is created from a collapsed version of the full 32-bit mask, to enable standard Starlink applications to view a form of the mask.
+The full mask is located at \texttt{MORE/LSST/MASK} and stores the 3-D version of the mask.
+The Pydantic model itself is located at \texttt{MORE/LSST/JSON} and internally it references explicit numerical components of the main file.
+
+\paragraph{ColorImage}
+
+\begin{figure}[!tbp]
+  \begin{center}
+    \begin{small}
+\begin{verbatim}
+   BLUE           <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        180,195,233,192,127,216,137,62,... 135,160,142,131
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
+
+   GREEN          <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        209,3,200,106,54,88,31,99,143, ... 149,139,24
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
+
+   LSST           <LSST>           {structure}
+      JSON(1)        <_CHAR*12703>   '{"red":{"data":{"source":"ndf:/RED/DATA_ARRAY/DATA","sha...'
+
+   RED            <NDF>           {structure}
+      DATA_ARRAY     <ARRAY>         {structure}
+         DATA(8,5)      <_UBYTE>        86,172,68,196,13,110,180,176,133,...129,88,115,175
+         ORIGIN(2)      <_INT64>        40,20
+
+      WCS            <WCS>           {structure}
+         DATA(187)      <_CHAR*32>      ' Begin FrameSet',... ' End FrameSet'
+\end{verbatim}
+    \end{small}
+  \end{center}
+  \caption{The structure of the HDF5 representation of a RGB color image serialized with the NDF data model.}
+  \label{fig:color-ndf}
+\end{figure}
+
+A \texttt{ColorImage} is an image with WCS that represents three color channels.
+In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the \texttt{/LSST/JSON} character array.
+This demonstrates that we can use the hierarchy in multiple ways to group related concepts.
+
+\subsubsection{Zarr Serialization}
+
+The Zarr file format\footnote{\url{https://zarr.dev}}\cite{10.5281/zenodo.3773449} is a cloud-optimized format designed for object stores.
+This is a relatively new format but it is being adopted by machine learning, bioimaging and geophysics communities.\cite{10.1175/JTECH-D-21-0106.1,10.1007/s00418-023-02209-1,10.1190/tle42070465.1}
+The format is implemented as a hierarchical tree with metadata and compressed binary data kept as separate files and supporting chunking and sharding of large datasets to allow very efficient subsetting.
+
+We have created an experimental Zarr writer that adopts standards from other scientific communities to try to maximize compatibility with existing tooling.
+We use the xarray / Climate and Forecasting conventions\footnote{\url{https://cfconventions.org}} for labeling data arrays and defining masks and also OME-NGFF\cite{10.1007/s00418-023-02209-1} conventions for multiscale support and simple affine transformation specifications where possible.
+By default we are using 256 $\times$ 256 pixel chunks with 16MB shards but we have not yet attempted to tune these parameters in a cloud environment.
+In particular, we would like to consider whether out cutout service performance could be improved if we were to adopt Zarr instead of FITS.\cite{DMTN-326}
+One obvious downside of that would be that we are required to serve the FITS files and would therefore have to double the storage cost to also store some data products in Zarr format.
+
+The JSON pydantic model and the WCS are serialized as JSON using an LSST-specific naming convention since there is no existing standard for these data models.
+An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:zarr} and the xarray interpretation of the same data file can be found in listing~\ref{lst:xarray}.
+
+\begin{lstlisting}[caption=Overview of the Zarr layout for a \texttt{VisitImage}, label={lst:zarr}]
+/
+|-- image (4000, 4072) float32
+|-- lsst
+|   |-- opaque_metadata
+|   |   `-- fits
+|   |       `-- primary (720, 80) uint8
+|   `-- tables
+|       `-- psf
+|           `-- piff
+|               `-- interp
+|                   `-- solution
+|                       `-- q (1, 625, 15) float64
+|-- lsst_json (88349,) uint8
+|-- mask (4000, 4072) uint16
+`-- variance (4000, 4072) float32
+\end{lstlisting}
+
+\begin{lstlisting}[caption=Xarray interpretation of the same DP1 example Zarr file, label={lst:xarray}]
+<xarray.Dataset> Size: 163MB
+Dimensions:    (y: 4000, x: 4072, None: 88349)
+Dimensions without coordinates: y, x, None
+Data variables:
+    image      (y, x) float32 65MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+    lsst_json  (None) uint8 88kB dask.array<chunksize=(88349,), meta=np.ndarray>
+    mask       (y, x) uint16 33MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+    variance   (y, x) float32 65MB dask.array<chunksize=(256, 256), meta=np.ndarray>
+Attributes:
+    data_model:  org.lsst.visit_image
+    version:     1
+    lsst:        {'version': 1, 'archive_class': 'VisitImage', 'json': 'lsst_...
+    ome:         {'version': '0.5', 'multiscales': [{'name': 'visitimage', 'a...
+\end{lstlisting}
+
+\section{Future Work}
+
+Now that we have demonstrated that the serialization system is general enough to support 4 output formats the next goal is to investigate other formats that have been mentioned by the community.
+Whilst it is not required that we support formats other than FITS, we feel that adding different formats and output data models can make the system more robust and expose bad assumptions.
+
+There is one additional file format that has been considered and it is ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data.
+We already share some common data models with ASDF, although we have no formal linkage to their schemas.
+ASDF uses a GWCS serialization\cite{2017ASPC..512..609D} to represent world coordinates and the AST library does include support for using that model export serialiation, although we might need to expand that support if there are mappings we use in AST that have no equivalent in GWCS.
+For the other data models we would have to investigate whether any of them warrant an attempt to expand the current formal ASDF schemas or whether we should treat them as non-standard extensions.
+
+One further image type we intend to add is a class to represent multiple masked image cutouts.
+We will need something like this to represent outputs from our bulk cutout system\cite{DMTN-326} and using this serialization approach gives us some flexibility as to whether we serialize in the simpler ``collection of images'' way (such as using HDUs for each cutout) or a more compact approach favored by ML tooling such as the MultimodalUniverse\cite{2024RNAAS...8..301A} who recommend a N-dimensional arrays having all the cutout pixels in one place.
+
+\section{Conclusion}
+
+Our initial serialization system converting C++ data models to FITS that was developed in the early days of the LSST construction project\cite{2010SPIE.7740E..15A} did not meet our expectations in terms of cloud storage performance or ability to provide clear documentation to the community.
+We have developed a new approach that uses bespoke classes for different image types to replace an approach where a single class has to represent all possible metadata extensions.
+This has been coupled with an abstract file serialization system that lets us write the image data out in formats such as FITS and HDF5.
+To aid with cloud performance we are also proposing a new FITS convention whereby we store an index containing the byte offsets of each HDU.
+The intent is to switch to this new FITS format for Data Preview 2 which will be released in the second half of 2026.

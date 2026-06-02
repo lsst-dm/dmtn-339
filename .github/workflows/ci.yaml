@@ -20,7 +20,7 @@ jobs:
       - name: Python install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "lander<2.0.0" setuptools
+          python -m pip install "lander<2.0.0" "setuptools<82.0"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v1
@@ -38,4 +38,4 @@ jobs:
           LTD_PASSWORD: ${{ secrets.LTD_PASSWORD }}
           LTD_USERNAME: ${{ secrets.LTD_USERNAME }}
         run: |
-          lander --upload --pdf DMTN-339.pdf --ltd-product dmtn-339 --lsstdoc "DMTN-339.tex"
+          lander --upload --pdf DMTN-339.pdf --ltd-product dmtn-339 --lsstdoc "DMTN-339.tex" --author "James F. Bosch" --author "Tim Jenness" --author "Gregory P. Dubois-Felsmann" --abstract "At the NSF-DOE Vera C. Rubin Observatory the image-based data products include data models that are not described by any existing FITS standard. These include spatially-varying point-spread functions, complex World Coordinate System models, provenance information, and shutter motion profiles. For DP1 these data models were written using generic C++ storage APIs resulting in files that can only easily be read using our software. For DP2 we have changed our approach so as to write FITS files that are more accessible by the community and can be accessed more efficiently from object stores. In this presentation we will describe our new approach to serializing data models and how it compares with the existing files, and our approach for improving object store access to individual extensions and integration with the Butler. We will also discuss whether we can expand our file format support to include alternatives such as HDF5, Zarr, and ASDF."
