@@ -1,8 +1,8 @@
 \section{Introduction}
 
 The NSF-DOE Vera C.\ Rubin Observatory is designed to take data for the Legacy Survey of Space and Time over a period of 10 years.\cite{2019ApJ...873..111I}.
-We made our first data preview release (DP1) in 2025 using data from our commissioning camera\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from LSSTCam.\cite{10.71929/rubin/2571927,RTN-111}
-For all the Hyper Suprime-Cam Subaru (HSC) Strategic Program (SSP) data releases\cite{2022PASJ...74..247A} and for DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not in itself sufficient to fully define all the information that we need to record in our FITS files.
+We made our first data preview release (DP1) in 2025 using data from our commissioning camera (LSSTComCam)\cite{RTN-095} and we are currently preparing our second data preview (DP2) using data from the LSST Camera (LSSTCam).\cite{10.71929/rubin/2571927,RTN-111}
+For all the Hyper Suprime-Cam Subaru (HSC) Strategic Program (SSP) data releases\cite{2022PASJ...74..247A} and for DP1 our image data products were written in FITS format following the FITS standard\cite{FITS4} but the FITS standard is not sufficient to fully define all the information that we need to record in our FITS files.
 The resulting FITS files were able to represent concepts such as variances and masks but provenance and point-spread function definitions were represented as opaque binary-table data that required Rubin-specific software\cite{PSTN-019} to interpret.
 In this paper we will describe the FITS layout we used for DP1 and describe its limitations.
 Then we will present our new approach to modeling our data structures and how we represent it in both FITS and HDF5 files.
@@ -11,17 +11,15 @@ Then we will present our new approach to modeling our data structures and how we
 
 One of the most complex image dataset types we write are those associated with our single-epoch visit images.
 At Rubin we define ``visit'' as an on-sky exposure.
-During construction we had planned to support an observing mode where two on-sky exposures would be taken sequentially without moving the telescope or instrument rotator and those would be called a visit.
-This changed during commissioning when we decided to drop the two-exposure mode and so now a visit is always a single on-sky exposure.
 For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
 
-In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the 189-CCD LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
-The main package implementing the legacy serialization code is called AFW\footnote{Sometimes thought of as standing for ``application framework'' and other times ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
+In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
+Our main package implementing the legacy serialization code is called AFW\footnote{Sometimes thought of as standing for ``application framework'' and other times ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
 This in-memory representation is serialized to an external representation using the Rubin Butler system.\cite{2022SPIE12189E..11J}
-While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS, as noted above.
+While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS.
 Every visit includes the image pixel data array, along with corresponding 32-bit mask and variance arrays, together with FITS-style (keyword, value, and comment) metadata.
 
-The following additional components then go beyond the natural elements of the FITS file data model.
+The following additional components then go beyond the standard elements of the FITS file data model.
 
 \subsection{Bounded Fields}
 
@@ -32,13 +30,14 @@ We call these \emph{bounded fields} and they are usually represented as Chebyshe
 
 A \texttt{VisitInfo} object contains standardized information about the entire visit.
 This includes the weather conditions, the instrument and observatory location, the time of the observation, the boresight tracking coordinates, and the exposure time.
-Confusingly, calibration observations do result in a \texttt{VisitInfo} being defined although some of the components may be undefined in that case, e.g., for observations of the internal dome screen.
+Calibration observations also result in a \texttt{VisitInfo} being defined although some of the components may be undefined in that case, such as for observations of the internal dome screen.
 We will not consider calibration datasets any further in this discussion since they generally are representable by a subset of the visit data model.
 
 \subsection{Filter Label}
 
 This is a small look up table defining the physical filter used for the observation and the waveband for that filter.
-In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} using the Rubin science pipelines we attempted to store a more complex filter type that recorded filter widths and centers, but we decided that this led to discrepancies between the measured filter profiles and the data files when the calibrations of filter profiles were subsequently improved.
+In older data releases made for HSC SSP\cite{2018PASJ...70S...8A} using the Rubin science pipelines we attempted to store a more complex filter type that recorded filter widths and centers.
+We decided that this led to discrepancies between the measured filter profiles and the data files when the calibrations of filter profiles were subsequently improved.
 It is much simpler to store the physical filter name itself and then use that as a look-up key into an external data set.
 
 \subsection{Detector Information}
@@ -48,13 +47,14 @@ Each dataset contains a special detector object that describes the properties of
 
 \subsection{Point-Spread Function}
 
-There are many ways to represent a point-spread function (PSF) and we use a plugin system to allow different variants to be stored.
+There are many ways to represent a point-spread function (PSF).
+We use a plugin system to allow different variants to be stored.
 We use both a heavily modified version of \texttt{PSFEx} \cite{2011ASPC..442..435B,2013ascl.soft01001B} and \texttt{Piff} \cite{2021ascl.soft02024J,2021MNRAS.501.1282J} in our production pipelines.
 The PSF can vary across the image and the PSF model has to be able to account for that.
 
 \subsection{Exposure Summary Statistics}
 
-During the analysis of a visit the pipeline calculates derived scalar quantities which we store in a small class.
+During the analysis of a visit the pipeline calculates derived scalar quantities which we store in a small class named \texttt{ExposureSummaryStats}.
 These include summaries of global PSF properties, source counts, and effective exposure times and bounding boxes.
 This information can be used by downstream pipeline components to decide whether a visit should be included in a co-add or not.
 Unlike \texttt{VisitInfo} the summary statistics can change depending on pipeline configuration.
@@ -122,8 +122,8 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
 \end{verbatim}
 \end{small}
 \end{center}
-\label{fig:old-layout}
 \caption{The structure of a representative DP1 FITS file using the legacy schema.}
+\label{fig:old-layout}
 \end{figure}
 
 
@@ -154,7 +154,7 @@ The remaining content is stored in FITS binary tables.
 
 The fundamental serialization approach for the DP1 data involves a generic persistence infrastructure that converts exposure components into rows of tables that can be stored in FITS.
 
-Each component registers itself as a storable that implements the creation of a tabular version of the object that can be stored.
+Each component registers itself as a \texttt{Storable} that implements the creation of a tabular version of the object that can be stored.
 During serialization each component is allocated an integer archive ID that is referenced by a table of contents stored in the \texttt{ARCHIVE\_INDEX} extension.
 The ID itself is stored in the primary FITS header with key \texttt{ARCHIVE\_INDEX\_<COMPONENT>}.
 
@@ -171,7 +171,7 @@ The components themselves are serialized in different ways.
 
 This is a very simple table with two rows.
 One row indicates the wave band (and whether it is defined or not) and the other row contains the physical filter name (and its definedness state).
-These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
+These two items could have easily been represented as FITS headers, as was done for \texttt{VisitInfo}, but instead we took the more standardized yet complex approach of fitting directly into the archive system by creating a binary table.
 
 \item[\textbf{Detector}]
 
@@ -218,10 +218,10 @@ The PSF component is polymorphic.
 AFW only sees it through the persistable interface.
 The actual FITS representation depends on the concrete PSF class and its registered factory.
 For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
-The PIFF serialization uses the Python storable interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
-At the time of creation of DP1 there was no standardized PIFF serialization we could persist other than Pickle (a situation which has now been fixed).
+The PIFF serialization uses the Python \texttt{Storable} interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
+At the time of creation of DP1 there was no standardized PIFF serialization we could persist other than pickle (a situation which has now been fixed).
 This decision was the pragmatic one at the time but it means that a user reading our files without using our code \emph{must} use Python to reconstruct the PIFF object and does not have the option of implementing their own equivalent in another language.
-The use of Pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
+The use of pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
 
 \end{description}
 
@@ -239,17 +239,18 @@ As can be seen from Fig.~\ref{fig:old-layout} the extension names do not necessa
 As described previously, multiple components can also be written to the same HDU, with the \texttt{EXTNAME} referring to only one of the components out of convenience.
 In order to understand what each extension is part of you must first read the index extension.
 
-The complex logic effectively requires an end-user uses the \texttt{lsst.afw} Python classes to read the extensions.
+The complex logic effectively requires an end-user to use the \texttt{lsst.afw} Python classes to read the extensions.
 Re-implementing the logic in Astropy or a language other than Python or C++ is potentially possible for a highly motivated individual (and with modern large-language model coding tools using the AFW code as a reference someone might be tempted to try it), but it would be preferable to avoid this situation (and the associated need to create corresponding non-AFW classes for all the components) if at all possible.
-Additionally, we are formally required to fully document how to read the files we ship to the community, and so are motivated to ship a file format that can be described relatively straightforwardly.
-Using Pickles for the current format makes documentation effectively impossible.
+Additionally, we are formally required to provide complete documentation on how to read the files we distribute to the community.
+This motivates us to choose a file format that is easy to describe and understand.
+Using pickles for the current format makes documentation effectively impossible.
 
 The requirement to read the archive index does have other ramifications.
 The system was designed in an era when there was an assumption that the file would always be available on a POSIX file system.
-For DP1 we store the data in Google Cloud Storage and DP2 will be stored at SLAC but accessed remotely from Google\cite{2024SPIE13101E..2BO} over https.
+For DP1 we store the data in Google Cloud Storage and DP2 will be stored at the SLAC National Accelerator Laboratory but accessed remotely from Google\cite{2024SPIE13101E..2BO} using web protocols.
 When a user requests a component, such as the valid polygon, we would ideally like to retrieve only the HDU containing that information.
 The simplest option would be to download the entire file to local storage and then read the component.
-To avoid downloading megabytes of pixel data, instead what we have to do is construct fake single-pixel image HDUs for the image/variance/mask arrays and then download all the extension HDUs so we can write a file locally and use the AFW code to read the index and then construct the extension.
+To avoid downloading megabytes of pixel data, instead we construct fake single-pixel image HDUs for the image/variance/mask arrays and then download all the extension HDUs so we can write a file locally and use the AFW code to read the index and then construct the extension.
 This is not efficient but is an inevitable outcome of the approach.
 
 \section{Changing Approach for DP2}
@@ -387,8 +388,8 @@ These headers are:
   The size of the JSON HDU.
 \end{description}
 
-At our scale, especially with the hybrid data center model we have had to adopt,\cite{2024SPIE13101E..2BO} it is critical for performance to reduce the number of server round trips when performing a cutout\cite{DMTN-208} and the index allows us to efficiently skip to exactly the HDUs that we need to read without having to scan the entire file.
-We are intending to submit the index HDU as a registered FITS convention once we can obtain some performance numbers.
+At our scale, especially with the hybrid data center model we have adopted,\cite{2024SPIE13101E..2BO} it is critical for performance to reduce the number of server round trips when performing a cutout\cite{DMTN-208} and the index allows us to efficiently skip to exactly the HDUs that we need to read without having to scan the entire file.
+We intend to submit the index HDU as a registered FITS convention once we can obtain some performance numbers.
 
 As discussed above for DP1 data, although our WCS fits are not always representable as standard FITS-WCS headers, we always try to write a FITS WCS to the headers of each image HDU.
 For co-adds this will be an accurate model but it will be an approximation for visit images and for LSSTCam visits the accuracy will be slightly worse at the edges of the focal plane than it was for LSSTComCam DP1 data.
@@ -511,7 +512,7 @@ The Pydantic model itself is located at \texttt{MORE/LSST/JSON} and internally i
 \end{figure}
 
 A \texttt{ColorImage} is an image with WCS that represents three color channels.
-In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the \texttt{/LSST/JSON} character array.
+In the NDF serialization, shown in Fig.~\ref{fig:color-ndf}, each color channel is an NDF stored at the top level and the data model is stored in the top-level at \texttt{/LSST/JSON} character array rather than inside a particular image hierarchy.
 This demonstrates that we can use the hierarchy in multiple ways to group related concepts.
 
 \subsubsection{Zarr Serialization}
@@ -524,7 +525,8 @@ We have created an experimental Zarr writer that adopts standards from other sci
 We use the xarray / Climate and Forecasting conventions\footnote{\url{https://cfconventions.org}} for labeling data arrays and defining masks and also OME-NGFF\cite{10.1007/s00418-023-02209-1} conventions for multiscale support and simple affine transformation specifications where possible.
 By default we are using 256 $\times$ 256 pixel chunks with 16MB shards but we have not yet attempted to tune these parameters in a cloud environment.
 In particular, we would like to consider whether out cutout service performance could be improved if we were to adopt Zarr instead of FITS.\cite{DMTN-326}
-One obvious downside of that would be that we are required to serve the FITS files and would therefore have to double the storage cost to also store some data products in Zarr format.
+One obvious downside of that would be that we are required to serve the FITS files and would therefore have to increase the storage cost to also store some data products in Zarr format.
+Furthermore, Zarr files are inherently directories with files inside and whilst switching to Zarr might lead to performance improvements in object stores for oue data access patterns, it increases the burden on the archiving systems that now have to track many more small files.
 
 The JSON pydantic model and the WCS are serialized as JSON using an LSST-specific naming convention since there is no existing standard for these data models.
 An example layout from a \texttt{VisitImage} can be found in listing~\ref{lst:zarr} and the xarray interpretation of the same data file can be found in listing~\ref{lst:xarray}.
@@ -565,10 +567,10 @@ Attributes:
 
 \section{Future Work}
 
-Now that we have demonstrated that the serialization system is general enough to support 4 output formats the next goal is to investigate other formats that have been mentioned by the community.
+Now that we have demonstrated that the serialization system is general enough to support four output formats the next goal is to investigate other formats that have been mentioned by the community.
 Whilst it is not required that we support formats other than FITS, we feel that adding different formats and output data models can make the system more robust and expose bad assumptions.
 
-There is one additional file format that has been considered and it is ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data.
+ASDF\cite{2015A&C....12..240G}, which STScI are adopting for the Nancy Grace Roman Space Telescope\cite{10.25080/majora-212e5952-000} and which will drive shared analysis with Rubin LSST data, is being considered as an additional file format.
 We already share some common data models with ASDF, although we have no formal linkage to their schemas.
 ASDF uses a GWCS serialization\cite{2017ASPC..512..609D} to represent world coordinates and the AST library does include support for using that model export serialiation, although we might need to expand that support if there are mappings we use in AST that have no equivalent in GWCS.
 For the other data models we would have to investigate whether any of them warrant an attempt to expand the current formal ASDF schemas or whether we should treat them as non-standard extensions.
@@ -578,8 +580,8 @@ We will need something like this to represent outputs from our bulk cutout syste
 
 \section{Conclusion}
 
-Our initial serialization system converting C++ data models to FITS that was developed in the early days of the LSST construction project\cite{2010SPIE.7740E..15A} did not meet our expectations in terms of cloud storage performance or ability to provide clear documentation to the community.
+Our initial serialization system which was developed in the early days of the LSST construction project\cite{2010SPIE.7740E..15A} converted C++ data models to FITS, but did not meet our cloud storage performance expectations or enable us to provide clear documentation to the community.
 We have developed a new approach that uses bespoke classes for different image types to replace an approach where a single class has to represent all possible metadata extensions.
 This has been coupled with an abstract file serialization system that lets us write the image data out in formats such as FITS and HDF5.
 To aid with cloud performance we are also proposing a new FITS convention whereby we store an index containing the byte offsets of each HDU.
-The intent is to switch to this new FITS format for Data Preview 2 which will be released in the second half of 2026.
+The intent is to switch to this new FITS format for Data Preview 2.
