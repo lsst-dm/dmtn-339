@@ -14,7 +14,7 @@ At Rubin we define ``visit'' as an on-sky exposure.
 For a visit observation the resulting files have to describe the detector properties, the point-spread function, the non-linear large-scale WCS, aperture corrections and other calibration effects.
 
 In the Rubin science pipelines,\cite{PSTN-019} visit images for individual detectors in the LSSTCam focal plane are natively represented in a Python data model, with a set of components described below (monospace-font terms that follow are typically Python class names).
-Our main package implementing the legacy serialization code is called AFW\footnote{Sometimes thought of as standing for ``application framework'' and other times ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
+Our main package implementing the legacy serialization code is called AFW\footnote{Originally this stood for ``application framework'' and over time people have said ``astronomy framework'', but we just refer to it these days as ``afw.''} with the bulk of the implementation being in C++.
 This in-memory representation is serialized to an external representation using the Rubin Butler system.\cite{2022SPIE12189E..11J}
 While the Butler was designed to permit multiple serialization forms for the in-memory datasets, for the Rubin pipeline implementations used through DP1, the only supported external representation was FITS.
 Every visit includes the image pixel data array, along with corresponding 32-bit mask and variance arrays, together with FITS-style (keyword, value, and comment) metadata.
@@ -76,10 +76,6 @@ For most detectors, the valid polygon is just the detector's bounding box, but t
 Multiple aperture corrections can be stored, each one being labeled and associated with a bounded field.
 Different measurement algorithms can result in different aperture corrections and the user can select the appropriate one.
 Each photometry algorithm has its own aperture correction, which is used to tie that algorithm to a common photometric system.
-
-\subsection{Transmission Curve}
-
-This component represents the throughput as a function of wavelength, generally using units of angstroms.
 
 \subsection{Photometric Calibration}
 
@@ -159,7 +155,7 @@ During serialization each component is allocated an integer archive ID that is r
 The ID itself is stored in the primary FITS header with key \texttt{ARCHIVE\_INDEX\_<COMPONENT>}.
 
 Each component is then represented in the \texttt{ARCHIVE\_INDEX} table indexed by the ID which refers to a later HDU and rows within that HDU.
-If components share the same table schema they are written to the same HDU, which leads to a storage efficiency but does mean that each HDU can not be interpreted without the primary index.
+If components share the same table schema they are written to the same HDU, which leads to a storage efficiency gain but does mean that each HDU can not be interpreted without the primary index given that the HDU name reflects the order that components were serialized in and so can vary from file to file.
 
 \subsubsection{Component Serializations}
 
@@ -210,7 +206,7 @@ In the example output there are two HDUs labeled as Chebyshevs because there are
 
 This is a Python data class.
 All Python packages must serialize as strings which are stored in a single bytes column.
-For this class the serialization uses YAML, but since this schema is also used by other components the HDU will likely contain serializations from other classes and the HDU name is going to depend on the order of serialization.
+For this class the serialization uses YAML as single string column and since this is a common serialization schema many components can share this table.
 
 \item[\textbf{PSFs}]
 
@@ -219,7 +215,7 @@ AFW only sees it through the persistable interface.
 The actual FITS representation depends on the concrete PSF class and its registered factory.
 For example, \texttt{PsfexPsf} from \texttt{meas\_extensions\_psfex} writes two catalogs and other PSF subclasses use their own schemas.
 The PIFF serialization uses the Python \texttt{Storable} interface and writes a single bytes column from the output of the Python \texttt{pickle} interface.
-At the time of creation of DP1 there was no standardized PIFF serialization we could persist other than pickle (a situation which has now been fixed).
+At the time of creation of DP1 there was no standardized PIFF serialization we could use outside of writing a standalone FITS file other than pickle (a situation which has now been fixed).
 This decision was the pragmatic one at the time but it means that a user reading our files without using our code \emph{must} use Python to reconstruct the PIFF object and does not have the option of implementing their own equivalent in another language.
 The use of pickle format also makes it impossible to document these files in a way that is useful to an archive user long in the future.
 
@@ -325,8 +321,6 @@ A conscious design decision was to abstract the file output from the serializati
 
 Every saveable Python type in the package (such as \texttt{Image}, \texttt{MaskedImage}, \texttt{VisitImage}, the various PSFs, transforms) has a paired serialization model — a Pydantic \texttt{ArchiveTree} subclass that mirrors the type's on-disk shape (e.g., \texttt{VisitImageSerializationModel} or \texttt{ColorImageSerializationModel}).
 The Python serialization model class is what is then persisted.
-The two are linked by a single class method defined on the Python class that returns the archive tree.
-The argument to this method is a small Pydantic model that names ``out-of-band data'' (large arrays, tables, frame sets) for a particular backend, with one existing for each backend (JSON, FITS, and NDF), referring to locations in the JSON model or an HDU number in a FITS file, or the hierarchical path of an HDF5 file.
 
 When a Python type is written, an \texttt{OutputArchive} for the backend is created and passed to that object's serialization method.
 A new archive tree Pydantic model is created where scalar fields are stored directly but large numerical arrays and tables are extracted and then referenced from the model.
@@ -337,7 +331,7 @@ On read the JSON is located using the backend-specific code and validated.
 The model is then handed off to a deserialization method which resolves all the references to other parts of the file and reads those to reconstruct the Python type.
 
 This design is what makes the three backends interchangeable.
-A Python class doesn't know whether it lives in a FITS HDU list or an HDS structure; it only knows how to translate itself to and from a Pydantic tree that contains references.
+A Python class doesn't know whether it lives in a FITS HDU list or an HDF5 hierarchical structure; it only knows how to translate itself to and from a Pydantic tree that contains references.
 Each backend supplies its own \texttt{OutputArchive}/\texttt{InputArchive} (which knows where to put bytes) and its own referencing type (which knows how to spell a pointer to those bytes).
 Adding a fourth backend means writing those three pieces; no Python class needs to change.
 Validation, schema export, and version stamping all live on the shared \texttt{ArchiveTree} layer, applied uniformly across backends.
